@@ -1,0 +1,6 @@
+[submodule "external/pyusb"]
+	path = external/pyusb
+	url = git://github.com/walac/pyusb.git
+[submodule "external/python-phonenumbers"]
+	path = external/python-phonenumbers
+	url = https://github.com/daviddrysdale/python-phonenumbers.git

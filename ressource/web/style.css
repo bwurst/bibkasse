@@ -1,0 +1,125 @@
+@media print
+{    
+    p.logout
+    {
+        display: none !important;
+    }
+}
+
+
+p.logout {
+  text-align: right;
+}
+
+div.baseinfo {
+  color: black;
+  font-size: 80%;
+}
+
+div.gesamtpreis {
+  font-size: 2em;
+  font-weight: bold;
+  text-align: right;
+  overflow: show;
+}
+
+div.beleg {
+	border: 1px solid black;
+  	padding: 1em;
+  	margin-bottom: 1em;
+  	text-decoration: none;
+  	color: black;
+}
+/*
+html {
+	font-size: 150%;
+}
+
+pre {
+	font-size: 200%;
+}
+
+td.right {
+  text-align: right;
+}
+
+.beleg {
+	display: flex;
+	flex-direction: column;
+	justify-content: space-between;
+	border: 1px solid black;
+  	padding: 1em;
+  	margin-bottom: 1em;
+  	text-decoration: none;
+  	color: black;
+}
+
+h4.kundenname {
+  margin: 0;
+  font-size: 3em;
+}
+
+div.baseinfo {
+	flex-grow: 10;
+	flex-basis: 0;
+}
+
+div.infos {
+	display: flex;
+	flex-direction: row;
+}
+
+div.beleg > p {
+	flex-basis: 0;
+	flex-grow: 2;
+}
+
+p.liter {
+	text-align: right;
+}
+
+p {
+	margin: 0;
+}
+
+p.gesamtpreis {
+  font-size: 200%;
+  font-weight: bold;
+  text-align: right;
+  flex-grow: 3;
+}
+
+p.datum, p.liter {
+	display: inline-block;
+	margin-right: 3em;
+}
+
+p.logout {
+	text-align: right;
+	margin: 0;
+	padding-right: 1em;
+	padding-bottom: 1em;
+}
+
+p.error {
+	border: 1px solid red;
+	background-color: #f88;
+	font-weight: bold;
+	font-size: 150%;
+}
+
+.phonebuttons {
+	display: flex;
+	flex-direction: row;
+}
+
+.phonebuttons > a {
+	display: block;
+	margin: 1em;
+	padding: 1em;
+	border: 1px solid black;
+	background-color: #ddd;
+	font-size: 2em;
+	text-decoration: none;
+}
+*/

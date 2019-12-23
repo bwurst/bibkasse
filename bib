@@ -1,0 +1,19 @@
+#!/bin/bash
+
+# Programmcode updaten
+cd "$(dirname ${0})"
+git pull
+# Update für Preisliste holen
+if [ -x "update.sh" ] ; then
+	./update.sh 
+fi
+
+while true ; do
+	"${0}.py" "${@}"
+	if [ $? == 99 ] ; then
+		continue
+	fi
+	break
+done
+
+

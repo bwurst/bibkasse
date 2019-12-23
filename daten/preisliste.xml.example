@@ -1,0 +1,120 @@
+<pricelist>
+  <item key="minprice" unit="Psch" desc="Mindermengenzuschlag" vat="19.0">
+    <key>3er</key>
+    <key>5er</key>
+    <key>10er</key>
+    <key>frischsaft</key>
+    <price>40.0</price>
+  </item>
+  <item rebategroup="liter" key="3er" desc="Abfüllung in 3-Liter-Karton" liter="3" vat="19.0">
+    <price liter="0">4.0</price>
+    <price liter="100">3.20</price>
+    <price liter="250">2.80</price>
+    <price liter="800">2.50</price>
+  </item>
+  <item rebategroup="liter" key="5er" desc="Abfüllung in 5-Liter-Karton" liter="5" vat="19.0">
+    <price liter="0">5.0</price>
+    <price liter="100">4.2</price>
+    <price liter="250">3.70</price>
+    <price liter="800">3.40</price>
+  </item>
+  <item rebategroup="liter" key="10er" desc="Abfüllung in 10-Liter-Karton" liter="10" vat="19.0">
+    <price liter="0">8.50</price>
+    <price liter="100">7.00</price>
+    <price liter="250">6.50</price>
+    <price liter="800">6.20</price>
+  </item>
+  <item rebategroup="birnen_vk" key="birnen_5er_vk" desc="Murrhardter Birnensaft in 5-Liter-Karton" vat="19.0">
+    <price count="0">7</price>
+    <price count="10">6.5</price>
+  </item>
+  <item key="birne_rhabarber_5er_vk" desc="Birne-Rhabarber-Saft in 5-Liter-Karton" vat="19.0">
+    <price count="0">7.5</price>
+  </item>
+  <item key="quitte_3er_vk" desc="Quittensaft in 3-Liter-Karton" vat="19.0">
+    <price count="0">5.0</price>
+  </item>
+  <item key="quitte_5er_vk" desc="Quittensaft in 5-Liter-Karton" vat="19.0">
+    <price count="0">7.5</price>
+  </item>
+  <item key="5er_vk_vorjahr" desc="Murrhardter Süßmost in 5-Liter-Karton (vom Vorjahr)" vat="19.0">
+    <price count="0">5.00</price>
+  </item>
+  <item rebategroup="saft_vk" key="5er_vk" desc="Murrhardter Süßmost in 5-Liter-Karton" vat="19.0">
+    <price count="0">6.40</price>
+    <!--<price count="10">6.00</price>-->
+  </item>
+  <item rebategroup="saft_vk" key="10er_vk" desc="Murrhardter Süßmost in 10-Liter-Karton" vat="19.0">
+    <price count="0">11</price>
+    <!--<price count="10">10.0</price>-->
+  </item>
+  <item rebategroup="saft_vk" key="5er_abfuellung_vk" desc="Murrhardter Süßmost in 5-Liter-Karton" liter="5" vat="19.0">
+    <price count="0">6.4</price>
+    <!--<price count="10">6.0</price>-->
+  </item>
+  <item rebategroup="saft_vk" key="10er_abfuellung_vk" desc="Murrhardter Süßmost in 10-Liter-Karton" liter="10" vat="19.0">
+    <price count="0">11</price>
+    <!--<price count="10">10.0</price>-->
+  </item>
+  <item key="most_5er_vk" desc="Murrhardter Most in 5-Liter-Karton" vat="19.0">
+    <price>6.5</price>
+  </item>
+  <item key="most_10er_vk" desc="Murrhardter Most in 10-Liter-Karton" vat="19.0">
+    <price>11.5</price>
+  </item>
+  <item rebategroup="liter_frisch" unit="Liter" key="frischsaft" desc="Pressen ohne Abfüllung" vat="19.0">
+    <price count="0">0.20</price>
+    <price count="300">0.17</price>
+    <price count="500">0.16</price>
+  </item>
+  <item key="holzstaender_klassisch" desc="Holzständer klassisch für Bag-in-Box" vat="19.0">
+    <price>10.00</price>
+  </item>
+  <item key="holzstaender_eh_5er_ablage" desc="Holzständer mit Ablage Erlacher Höhe für 5-l-Bag-in-Box" vat="19.0">
+    <price>35.00</price>
+  </item>
+  <item key="holzstaender_eh_5er_ohne" desc="Holzständer Erlacher Höhe für 5-l-Bag-in-Box" vat="19.0">
+    <price>25.00</price>
+  </item>
+  <item key="holzstaender_eh_10er" desc="Holzständer Erlacher Höhe für 10-l-Bag-in-Box" vat="19.0">
+    <price>35.00</price>
+  </item>
+  <item key="3er_gebraucht" desc="Rabatt für gebrauchten Karton (3l)" vat="19.0">
+  	<price>-0.4</price>
+  </item>
+  <item key="5er_gebraucht" desc="Rabatt für gebrauchten Karton (5l)" vat="19.0">
+  	<price>-0.4</price>
+  </item>
+  <item key="10er_gebraucht" desc="Rabatt für gebrauchten Karton (10l)" vat="19.0">
+  	<price>-0.8</price>
+  </item>
+  <item unit="Fl." key="obstler_025" desc="Obstler 0,25l Flasche" vat="19.0"><price>4.0</price></item> 
+  <item unit="Fl." key="obstler_050" desc="Obstler 0,5l Flasche" vat="19.0"><price>6.0</price></item> 
+  <item unit="Fl." key="obstler_100" desc="Obstler 1l Flasche" vat="19.0"><price>10.0</price></item> 
+  <item key="kanister_5l" desc="5-Liter-Kanister" vat="19.0"><price>3.0</price></item> 
+  
+  
+  <item rebategroup="saft_offen" unit="Liter" key="saft_offen" desc="Süßmost offen" vat="0">
+    <price count="0">1.0</price>
+    <price count="11">0.8</price>
+    <price count="31">0.8</price>
+    <price count="61">0.75</price>
+    <price count="101">0.75</price>
+    <!--<price count="201">0.5</price>
+    <price count="301">0.45</price>-->
+  </item>
+
+  <item rebategroup="ohnepressen" unit="Liter" key="ohnepressen" desc="Rabatt für bereits gepressten Saft" vat="19.0">
+    <price count="0">-0.20</price>
+    <price count="300">-0.17</price>
+  </item>
+  
+  <item key="gelee_apfel" desc="Apfelgelee" vat="0"><price>1.9</price></item>
+  <item key="gelee_apfel_rum" desc="Apfelgelee mit Rum" vat="0"><price>2.1</price></item>
+  <item key="gelee_apfel_zimt" desc="Apfelgelee mit Zimt" vat="0"><price>2.0</price></item>
+  <item key="gelee_quitten" desc="Quittengelee" vat="0"><price>2.0</price></item>
+  <item key="pflaumenmarmelade" desc="Pflaumenmarmelade" vat="0"><price>2.0</price></item>
+
+  <item key="doerrzwetschgen" desc="Zwetschgen gedörrt" vat="0"><price>1.5</price></item>
+  <item key="doerraepfel" desc="Apfelstücke gedörrt" vat="0"><price>1.5</price></item>
+</pricelist>
