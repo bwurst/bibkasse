@@ -52,7 +52,7 @@ class WidgetStartpage(QtWidgets.QWidget):
     def update(self):
         if len(self.mainwindow.letzte_belege) == 0:
             self.ui.errordisplay.setText('Lade letzte Belege...')
-            invoicelist = self.speicher.listBelegeByDateDesc()
+            invoicelist = self.speicher.listVorgaengeByDateDesc()
             # Speichere direkt in die Liste, damit wir die Liste nicht umdrehen müssen
             self.mainwindow.letzte_belege = invoicelist[:10]
             self.ui.errordisplay.setText('Lade letzte Belege... fertig!')

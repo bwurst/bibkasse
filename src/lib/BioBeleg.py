@@ -35,19 +35,19 @@ def findeNaechsteNummer():
     return '%04i-%03i' % (date.today().year, max + 1)
 
 
-def BioBeleg(beleg, filename = None):
-    if not beleg:
+def BioBeleg(vorgang, filename = None):
+    if not vorgang:
         return False
-    lieferant = beleg.getBioLieferant()
-    kontrollstelle = beleg.getBioKontrollstelle()
+    lieferant = vorgang.getBioLieferant()
+    kontrollstelle = vorgang.getBioKontrollstelle()
     if not kontrollstelle:
         return False
 
-    pdfdata = PDFBioBeleg(beleg, lieferant, kontrollstelle)
+    pdfdata = PDFBioBeleg(vorgang, lieferant, kontrollstelle)
     if not os.path.exists(PFAD):
         os.makedirs(PFAD)
     if not filename:
-        nummer = beleg.getRechnungsnummer()
+        nummer = vorgang.getRechnungsnummer()
         if not nummer:
             nummer = findeNaechsteNummer()    
         filename = 'BIO-%s.pdf' % nummer
@@ -56,7 +56,7 @@ def BioBeleg(beleg, filename = None):
     f.write(pdfdata)
     f.close()
     s = Speicher()
-    s.speichereBeleg(beleg)
+    s.speichereVorgang(vorgang)
     print('BIO-Beleg saved to %s' % filename)
     return filename
 

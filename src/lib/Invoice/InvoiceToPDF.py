@@ -245,10 +245,7 @@ class PDF(object):
         self.iv = iv
         self.firstPage()
         self.canvas.setFont(self.font+'-Bold', self.font_size+3)
-        if self.iv.tender:
-            self.title('Angebot')
-        else:
-            self.title('Rechnung')
+        self.title(self.iv.title)
 
         if self.iv.tender:
             self.canvas.setFont(self.font, self.font_size)
@@ -399,6 +396,7 @@ class PDF(object):
                             self.canvas.setFont(self.font, font_size)
                             self.y -= self.line_height + self.line_padding
                             summaries = []
+                            vat = 0.0
                             if len(part.vat) == 1 and list(part.vat.keys())[0] == 0.0:
                                 self.canvas.drawString(left, self.y-self.font_height, 'Diese Rechnung enthält durchlaufende Posten ohne Berechnung von MwSt.')
                                 self.y -= self.line_height
@@ -453,6 +451,37 @@ class PDF(object):
                         self.canvas.drawRightString(left + 16.8*cm, self.y-self.font_height, _formatPrice(sum))
                         self.canvas.setFont(self.font, font_size)
                         self.y -= self.line_height + self.line_padding
+                    paysum = 0.0
+                    for pay in part.payments:
+                        paysum += pay['amount']
+                        descr = 'Zahlung' 
+                        if pay['type'] == 'cash':
+                            descr = 'gegeben'
+                        elif pay['type'] == 'return':
+                            descr = 'zurück'
+                        elif pay['type'] == 'ec':
+                            descr = 'Kartenzahlung (EC)'
+                        elif pay['type'] == 'gutschein':
+                            descr = 'Einlösung Gutschein'
+                        if pay['date'] != self.iv.date:
+                            descr += ' am %s' % (pay['date'].strftime('%d. %m. %Y'))
+                        self.canvas.drawRightString(left + 14.5*cm, self.y-self.font_height, descr + ':')
+                        self.canvas.drawRightString(left + 16.8*cm, self.y-self.font_height, _formatPrice(pay['amount']))
+                        self.y -= self.line_height
+                    sum = part.sum
+                    if part.vatType == 'net':
+                        sum = 0
+                        for vat, vatdata in part.vat.items():
+                            sum += (vat+1)*vatdata[0] 
+                    rest = sum - paysum
+                    if part.payments and rest > 0:
+                        self.canvas.setFont(self.font+'-Bold', font_size)
+                        self.canvas.drawRightString(left + 14.5*cm, self.y-self.font_height, 'Offener Rechnungsbetrag:')
+                        self.canvas.drawRightString(left + 16.8*cm, self.y-self.font_height, _formatPrice(rest))
+                        self.canvas.setFont(self.font, font_size)
+                        self.y -= self.line_height + self.line_padding
+                        
+                    self.y -= self.line_padding
             elif type(part) == InvoiceText:
                 my_font_size = font_size
                 self.canvas.setFont(self.font, my_font_size)
@@ -506,16 +535,16 @@ def InvoiceToPDF(iv):
 
 if __name__ == '__main__':
     import datetime
-    from lib.Beleg import Beleg
+    from lib.Vorgang import Vorgang
     from lib.BelegRechnung import BelegRechnung
-    beleg = Beleg()
+    vorgang = Vorgang()
     for n in range(30):
-        dummy = beleg.newItem(n, None, 'Dummy #%i' % n, 0.01, 0, 'Stk', False, 19.0, 0.0)
-    beleg.kunde.setName('Müller')
-    beleg.setAdresse('Testkunde\nTeststraße 1\nTestort')
-    beleg.setRechnungsdaten('2014-12-10', '2014-9999')
-    beleg.setZeitpunkt(datetime.datetime.now())
-    filename = BelegRechnung(beleg)
+        dummy = vorgang.newItem(n, None, 'Dummy #%i' % n, 0.01, 0, 'Stk', False, 19.0, 0.0)
+    vorgang.kunde.setName('Müller')
+    vorgang.setAdresse('Testkunde\nTeststraße 1\nTestort')
+    vorgang.setRechnungsdaten('2014-12-10', '2014-9999')
+    vorgang.setZeitpunkt(datetime.datetime.now())
+    filename = BelegRechnung(vorgang)
     print (filename)
 
 

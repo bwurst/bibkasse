@@ -17,9 +17,10 @@
 # along with Bib2011.  If not, see <http://www.gnu.org/licenses/>.
 
 from lib.helpers import getMoneyValue 
+from lib.Speicher import Speicher
 
 
-def BelegHTML(beleg, public=True):
+def BelegHTML(vorgang, public=True):
     fussnoten = {}
     def fussnote(msg):
         candidate = 1
@@ -32,17 +33,17 @@ def BelegHTML(beleg, public=True):
     
     html = ''
     if not public:
-        name = beleg.getKundenname()
+        name = vorgang.getKundenname()
         html += '<h3>' + name + '</h3>\n'
         
         html += '<p>&nbsp;</p>\n'
     
     datumswerte = set()
-    for item in beleg.getEntries():
+    for item in vorgang.getEntries():
         datumswerte.add(item.getDatum())
         
     posten = {}
-    for item in beleg.getEntries():
+    for item in vorgang.getEntries():
         if item.getDatum() not in posten.keys():
             posten[item.getDatum()] = []
         posten[item.getDatum()].append(item)
@@ -73,29 +74,42 @@ def BelegHTML(beleg, public=True):
                 html += ' '*32
             html += u'   %11s (%4.1f%%)</pre>\n' % (getMoneyValue(entry.getNormalsumme()), entry.getSteuersatz())
     
-    html += u'<p style="font-size: 25pt; margin-top: 2em; font-weight: bold;">Gesamtbetrag: &nbsp; &nbsp; %11s </p>\n' % getMoneyValue(beleg.getNormalsumme())
+    html += u'<p style="font-size: 25pt; margin-top: 2em; font-weight: bold;">Gesamtbetrag: &nbsp; &nbsp; %11s </p>\n' % getMoneyValue(vorgang.getNormalsumme())
 
-    zahlungen = beleg.getZahlungen()
+    zahlungen = vorgang.getZahlungen()
     if len(zahlungen) > 0:
         for z in zahlungen:
             bemerkung = ''
             if z['bemerkung']:
                 bemerkung = ' (%s)' % z['bemerkung']
-            html += u'<p>Zahlung (%s) am %s%s: %11s</p>' % (z['zahlart'], z['zeitpunkt'], bemerkung, getMoneyValue(z['betrag']))
-        html += u'<p style="font-size: 25pt; font-weight: bold;">Restbetrag: &nbsp; &nbsp; %11s </p>\n' % getMoneyValue(beleg.getZahlbetrag())
+            html += u'<p>Zahlung (%s) am %s%s: %11s</p>' % (z['zahlart'], z['timestamp'], bemerkung, getMoneyValue(z['betrag']))
+        html += u'<p style="font-size: 25pt; font-weight: bold;">Restbetrag: &nbsp; &nbsp; %11s </p>\n' % getMoneyValue(vorgang.getZahlbetrag())
         
 
-    html += '<p>Gesamtmenge Bag-in-Box: %i Liter</p>\n' % beleg.getLiterzahl()
+    html += '<p>Gesamtmenge Bag-in-Box: %i Liter</p>\n' % vorgang.getLiterzahl()
     if not public:
         html += '<hr />'
-        html += '<p>Anzahl Paletten: <strong>%i</strong></p>\n' % beleg.getPaletten()
-        if beleg.getAbholung():
-            html += '<p>Abholung: %s</p>\n' % beleg.getAbholung()
-        if beleg.getTelefon():
-            html += '<p>Telefon: %s</p>\n' % beleg.getTelefon()
+        html += '<p>Anzahl Paletten: <strong>%i</strong></p>\n' % vorgang.getPaletten()
+        if vorgang.getAbholung():
+            html += '<p>Abholung: %s</p>\n' % vorgang.getAbholung()
+        if vorgang.getTelefon():
+            html += '<p>Telefon: %s</p>\n' % vorgang.getTelefon()
 
-        if beleg.getPayed():
+        if vorgang.getPayed():
             html += u'<p><strong>*** BEZAHLT ***</strong></p>'
+
+        s = Speicher()
+        anrufe = s.getAnrufe(vorgang)
+        for anruf in anrufe:
+            if anruf['ergebnis'] == 'erreicht':
+                html += '<p>Anruf %s - Erreicht - %s</p>\n' % (anruf['timestamp'],anruf['bemerkung'])
+            elif anruf['ergebnis'] == 'ab':
+                html += '<p>Anruf %s - AB</p>\n' % (anruf['timestamp'],)
+            elif anruf['ergebnis'] == 'nichterreicht':
+                html += '<p>Anruf %s - NICHT erreicht</p>\n' % (anruf['timestamp'],)
+            else:
+                html += '<p>Anruf %s - %s</p>\n' % (anruf['ergebnis'], anruf['timestamp'])
+
 
     for key, msg in fussnoten.items():
         html += '<p>%i: %s</p>' % (key, msg)

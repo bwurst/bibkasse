@@ -1,0 +1,31 @@
+{
+	"tse": {
+		"library": "/home/bernd/git/python-tse/src/lib",
+		"clientid": "0000000-00000000-00000000",
+		"adminpin": "12345",
+		"timeadminpin": "98765",
+		"adminpuk": "123456"
+	},
+	"sms": {
+		"host": "xml3.aspsms.com",
+		"port": 5061,		
+		"email": "...",
+		"password": "...",
+		"userkey": "...",
+		"number": "+49123456789",
+		"sentfolder": "daten/sms/sent"
+	},
+	"printer_plain": {
+	  "media": "A4",
+	  "copies": "1",
+    "sides": "one-sided",
+    "InputSlot": "PF100A"
+	},
+	"printer_labels": {
+	  "media": "a4",
+	  "MediaType": "Labels",
+	  "copies": "1",
+    "sides": "one-sided",
+    "InputSlot": "Internal"
+	}
+}

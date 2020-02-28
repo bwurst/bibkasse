@@ -21,50 +21,35 @@ import os
 from lib.Invoice.InvoiceObjects import Invoice, InvoiceTable, InvoiceText
 #from invoice.InvoiceToText import *
 from lib.Invoice.InvoiceToPDF import InvoiceToPDF
-
 from lib.Speicher import Speicher
-
+from lib.helpers import getMoneyValue
 from datetime import date
 
 PFAD = 'daten/rechnungen'
 
 
-def findeNaechsteRechnungsnummer():
-    files = sorted(list(os.listdir(PFAD)))
-    try:
-        max = int(files[-1].replace('.pdf', '').rsplit('-')[-1])
-    except:
-        max = 0
-    return '%04i-%03i' % (date.today().year, max + 1)
-
-
-def BelegRechnung(beleg, cash = False, originale = [], rechnungsadresse = None):
-    if not beleg:
-        return False
-      
-    adresse = beleg.kunde.getAdresse()
-    if rechnungsadresse:
-        adresse = rechnungsadresse
-    
-    from io import BytesIO
-    file = BytesIO()
+def BelegRechnung(kb):
     invoice = Invoice()
-    invoice.customerno = None
+    if kb['type'] == 'storno':
+        s = Speicher()
+        storno = s.getKassenbeleg(kb['referenz'])
+        invoice.title = 'Rechnungskorrektur zu %s' % storno['renr'] 
+    invoice.customerno = kb['kunde']['kundennummer']
     invoice.salutation = None
-    if adresse:
-        invoice.addresslines = [x for x in adresse.split('\n') if x != '']
+    if kb['kunde']['adresse']:
+        invoice.addresslines = [x for x in kb['kunde']['adresse'].split('\n') if x != '']
     else:
         invoice.addresslines = []
-    invoice.setDate(date.today())
+    invoice.setDate(kb['redatum'])
       
-    data = beleg.getEntries()
+    data = kb['posten']
     
     vatType = 'gross'
     tab = InvoiceTable(vatType=vatType)
     
     datumswerte = set()
     for item in data:
-        datumswerte.add(item.getDatum())
+        datumswerte.add(item['datum'])
 
     nur_heute = False        
     if len(datumswerte) == 1 and date.today() in datumswerte:
@@ -74,16 +59,16 @@ def BelegRechnung(beleg, cash = False, originale = [], rechnungsadresse = None):
                         {'count': float(item['anzahl']),
                          'unit': str(item['einheit']),
                          'subject': item['beschreibung'],
-                         'price': float(item['einzelpreis']),
-                         'vat': float(item.getSteuersatz()),
+                         'price': float(item['einzelpreis_brutto']),
+                         'vat': float(item['mwst_satz']),
                          } 
                         )
     else:
         posten = {}
         for item in data:
-            if item.getDatum() not in posten.keys():
-                posten[item.getDatum()] = []
-            posten[item.getDatum()].append(item)
+            if item['datum'] not in posten.keys():
+                posten[item['datum']] = []
+            posten[item['datum']].append(item)
         
         for datum in sorted(posten.keys()):
             entries = posten[datum]
@@ -93,18 +78,41 @@ def BelegRechnung(beleg, cash = False, originale = [], rechnungsadresse = None):
                     {'count': float(item['anzahl']),
                      'unit': str(item['einheit']),
                      'subject': item['beschreibung'],
-                     'price': float(item['einzelpreis']),
-                     'vat': float(item.getSteuersatz()),
+                     'price': float(item['einzelpreis_brutto']),
+                     'vat': float(item['mwst_satz']),
                      } 
                     )
+
+    for z in kb['zahlungen']:
+        if z['type'] == 'bar':
+            if z['gegeben'] and type(z['zurueck']) != type(None):
+                tab.addPayment(type='cash', amount=z['gegeben'], date=z['zeitpunkt'].date())
+                tab.addPayment(type='return', amount=z['zurueck'], date=z['zeitpunkt'].date())
+            else:
+                tab.addPayment(type='cash', amount=z['betrag'], date=z['zeitpunkt'].date())
+        else:
+            tab.addPayment(type=z['type'], amount=z['betrag'], date=z['zeitpunkt'].date())
+
     invoice.parts.append(tab)
     
-    invoice.cash = cash
-    
-    if invoice.cash:
+        
+    if not kb['zahlart']:
         text = InvoiceText('Betrag dankend erhalten.')
         invoice.parts.append(text)
-    else:
+
+    if kb['tse_processtype'] == 'Kassenbeleg-V1':
+        text = InvoiceText('Zum Zeitpunkt der Belegerstellung war keine technische Sicherungseinrichtung verfügbar!')
+        if kb['tse_time_start']:
+            text = InvoiceText('Daten der technischen Sicherungseinrichtung:\n' 
+                               'Beginn des Vorgangs: %s, Ende des Vorgangs: %s\n'
+                               'Seriennummer: %s\n' 
+                               'Transaktionsnummer: %s, Signaturzähler: %s\n' 
+                               'Signatur:\n'
+                               '%s'
+                               % (kb['tse_time_start'], kb['tse_time_end'], kb['tse_serial'], kb['tse_trxnum'], kb['tse_sigcounter'], kb['tse_signature']))
+        invoice.parts.append(text)
+        
+    if kb['zahlart'] == 'ueberweisung':
         text = InvoiceText('Bitte begleichen Sie diese Rechnung innerhalb von 2 Wochen nach Erhalt auf das unten angegebene Konto.')
         invoice.parts.append(text)
     
@@ -115,24 +123,8 @@ def BelegRechnung(beleg, cash = False, originale = [], rechnungsadresse = None):
         text = InvoiceText('Wir danken Ihnen, dass Sie unser Angebot in Anspruch genommen haben.')
         invoice.parts.append(text)
     
-    if invoice.official:
-        invoice.id = findeNaechsteRechnungsnummer()
-    else:
-        invoice.id = '000'
+    invoice.id = kb['renr']
     
-    if invoice.id and len(originale) > 0:
-        s = Speicher()
-        for b in originale:
-            b.setRechnungsdaten(date.today(), invoice.id)
-            if invoice.cash:
-                if not b.getPayed():
-                    b.setBanktransfer(False)
-                    b.setPayed(True)
-                    s.speichereZahlung(b, 'bar', b.getZahlbetrag())
-            else:
-                b.setBanktransfer(True)
-            s.speichereBeleg(b)
-        
     pdfdata = InvoiceToPDF(invoice)
     filename = "%s/%s.pdf" % (PFAD, invoice.id) 
     f = open(filename, "wb")
@@ -141,25 +133,10 @@ def BelegRechnung(beleg, cash = False, originale = [], rechnungsadresse = None):
     return filename
 
 
-def rechnungsPDFDatei(beleg):
-    if not beleg.isRechnung():
+def rechnungsPDFDatei(vorgang):
+    if not vorgang.isRechnung() or vorgang.isPayed():
         return None
-    filename = "%s/%s.pdf" % (PFAD, beleg.getRechnungsnummer()) 
+    
+    filename = "%s/%s.pdf" % (PFAD, vorgang.getRechnungsnummer()) 
     return filename
 
-
-def storniereRechnung(beleg):
-    datei = rechnungsPDFDatei(beleg)
-    if not datei:
-        return False
-    if os.path.exists(datei):
-        os.unlink(datei)
-    s = Speicher()
-    rechnungsnr = beleg.getRechnungsnummer()
-    for b in s.listBelege():
-        if b.isRechnung() and b.getRechnungsnummer() == rechnungsnr:
-            b.setRechnungsdaten(None)
-            b.setBanktransfer(False)
-            b.setPayed(False)
-            s.speichereBeleg(b)
-    

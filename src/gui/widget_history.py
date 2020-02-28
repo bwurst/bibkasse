@@ -17,28 +17,18 @@
 # along with Bib2011.  If not, see <http://www.gnu.org/licenses/>.
 
 from PyQt5 import QtCore, QtWidgets, uic
-import tempfile, subprocess, os, sys, datetime
-import cups
+import sys, datetime
 
 from gui.alte_abfuellungen_listentry import AbfuellungWidget
-from gui.textinput import showTextInputDialog
 from gui.dialog_anrufen import DialogAnrufen
-from gui.rechnungdialog import showRechnungDialog
 
 from lib.Speicher import Speicher
-from lib.Beleg import Beleg
+from lib.Vorgang import Vorgang
 from lib.BelegHTML import BelegHTML
-from lib.BelegThermo import BelegThermo, BeleglisteThermo
-from lib.BelegRechnung import BelegRechnung, rechnungsPDFDatei, storniereRechnung
-from lib.BioBeleg import BioBeleg
+from lib.BelegThermo import BeleglisteThermo
 from lib.SMS import receive_status
 from gui.kundenauswahl import showKundenAuswahlDialog
-
-
-PRINTER_OPTIONS = {'media': 'A4',
-                   'copies': '1',
-                   'sides': 'one-sided',
-                   'InputSlot': 'Internal'}
+from lib.Kassenbeleg import KassenbelegStornieren
 
 
 class WidgetHistory(QtWidgets.QWidget):
@@ -61,27 +51,23 @@ class WidgetHistory(QtWidgets.QWidget):
         self.__extended = extended
         self.__last10 = last10
         self.__showall = False
+        self.__menu = False
         self.filter_kunde = None
+        self.__aktueller_vorgang = None
 
 
         self.ui.input_suche.clicked = self.sucheClicked
         self.ui.input_suche.installEventFilter(self)
         self.ui.listWidget_2.itemClicked.connect(self.listWidgetClick)
-        #self.ui.listWidget_2.currentItemChanged.connect(self.belegAusgewaehlt)
-        if self.__extended or self.__last10:
-            self.ui.listWidget_2.itemSelectionChanged.connect(self.belegAusgewaehlt)
         self.ui.listWidget_version.currentItemChanged.connect(self.versionAusgewaehlt)
-        self.ui.button_bearbeiten.clicked.connect(self.belegOeffnen)
-        self.ui.button_belegdrucken.clicked.connect(self.belegDruckenThermo)
-        self.ui.button_rechnung.clicked.connect(self.rechnungAusBeleg)
+        self.ui.button_bearbeiten.clicked.connect(self.vorgangOeffnen)
+        self.ui.button_beleganzeigen.clicked.connect(self.belegAnzeigen)
         self.ui.button_rechnung_storno.clicked.connect(self.rechnungStornieren)
-        self.ui.button_ueberweisung.clicked.connect(self.toggleUeberweisung)
         self.ui.button_bezahlt.clicked.connect(self.toggleBezahlt)
-        self.ui.button_bio.clicked.connect(self.toggleBio)
     
-        self.ui.combo_year.currentIndexChanged.connect(self.updateAlteBelege)
+        self.ui.combo_year.currentIndexChanged.connect(self.updateAlteVorgaenge)
         self.ui.combo_sortierung.currentIndexChanged.connect(self.sortingChanged)
-        self.ui.input_suche.textChanged.connect(self.updateAlteBelege)
+        self.ui.input_suche.textChanged.connect(self.updateAlteVorgaenge)
         self.ui.button_sucheLeeren.clicked.connect(self.clearSuche)
 
         self.ui.button_reload.clicked.connect(self.reload)
@@ -89,51 +75,86 @@ class WidgetHistory(QtWidgets.QWidget):
         self.ui.button_listedrucken.clicked.connect(self.listedrucken)
         self.ui.button_extended.clicked.connect(self.extended)
         self.ui.button_anrufen.clicked.connect(self.anrufenClicked)
+        self.ui.button_zurueckstellen.clicked.connect(self.zurueckstellen)
+        self.ui.button_sammelbeleg.clicked.connect(self.vorgangKassieren)
+        
+        self.ui.button_sammelbeleg.hide()
+        self.setupUI()
+        
 
+    def setupUI(self):
+        #self.ui.listWidget_2.currentItemChanged.connect(self.vorgangAusgewaehlt)
+        try:
+            self.ui.listWidget_2.itemSelectionChanged.disconnect()
+        except Exception:
+            pass
+        if self.__extended or self.__last10:
+            self.ui.listWidget_2.itemSelectionChanged.connect(self.vorgangAusgewaehlt)
+
+        if self.__extended:
+            self.ui.button_listedrucken.setEnabled(False)
+            self.ui.stackErweitert.setCurrentIndex(0)
+        else:
+            self.ui.label_dateiname.setText('---')
+            self.ui.button_listedrucken.setEnabled(True)
+            self.ui.stackErweitert.setCurrentIndex(1)
+
+        if self.__last10 or self.__menu:
+            self.ui.groupbox_filter.hide()
+            self.ui.button_reload.hide()
+            self.ui.stackErweitert.setCurrentIndex(0)
+        else:
+            self.ui.groupbox_filter.show()
+            self.ui.button_reload.show()
+            
+        if self.__last10:
+            self.ui.button_extended.hide()
+            self.ui.button_listedrucken.hide()
+        else:
+            self.ui.button_extended.show()
+            self.ui.button_listedrucken.show()
 
     def anrufenClicked(self):
-        if self.ui.button_anrufen.isChecked():
-            belege = self.speicher.listBelegeUnbezahlt()
-            # Status der SMS-Aussendungen prüfen
-            receive_status(belege)
-        self.updateAlteBelege()
+        self.anrufen()
+        if self.__menu:
+            self.__menu = False
 
     def listWidgetClick(self, listWidgetItem = None):
         if not listWidgetItem:
             listWidgetItem = self.ui.listWidget_2.currentItem()
         if self.__extended or self.__last10:
-            self.belegAusgewaehlt(listWidgetItem)
-        elif self.ui.button_anrufen.isChecked():
-            self.anrufen(listWidgetItem)
-        else:
-            self.belegKassieren(listWidgetItem)
+            self.vorgangAusgewaehlt(listWidgetItem)
+        elif not self.__menu:
+            self.vorgangKassieren(listWidgetItem)
 
-          
+    def isShown(self):
+        # beim Neu-Aufrufen ist Extended immer aus
+        self.ui.button_extended.setChecked(False)
+        self.__extended = False
+        self.__menu = False
+        self.__aktueller_vorgang = None
+        # Status der SMS-Aussendungen prüfen
+        receive_status(self.speicher.listVorgaengeUnbezahlt())
+        self.setupUI()
+        self.update()
+
 
     def update(self):
+        self.setupUI()
         current_year = str(datetime.date.today().year)
         years = sorted(list(self.speicher.list_years()))
 
-        self.ui.combo_year.currentIndexChanged[int].disconnect(self.updateAlteBelege)
+        self.ui.combo_year.currentIndexChanged[int].disconnect(self.updateAlteVorgaenge)
 
         self.ui.combo_year.clear()
         for y in years:
             self.ui.combo_year.addItem(y)
         self.ui.combo_year.setCurrentIndex(self.ui.combo_year.findText(current_year))
-        self.ui.combo_year.currentIndexChanged[int].connect(self.updateAlteBelege)
-        self.updateAlteBelege()
+        self.ui.combo_year.currentIndexChanged[int].connect(self.updateAlteVorgaenge)
+        self.updateAlteVorgaenge()
         self.ui.button_extended.setChecked(self.__extended)
         self.ui.button_anrufen.setChecked(False)
-        if self.__extended:
-            self.ui.button_listedrucken.setEnabled(False)
-            self.ui.stackErweitert.setCurrentIndex(0)
-        else:
-            self.ui.button_listedrucken.setEnabled(True)
-            self.ui.stackErweitert.setCurrentIndex(1)
-        if self.__last10:
-            self.ui.button_extended.hide()
-            self.ui.button_listedrucken.hide()
-            self.ui.stackErweitert.setCurrentIndex(0)
+        self.ui.listWidget_version.clear()
 
     def clearSuche(self):
         self.filter_kunde = None
@@ -145,84 +166,113 @@ class WidgetHistory(QtWidgets.QWidget):
         self.ui.input_suche.setText(kunde.getName())
         #self.ui.input_suche.setText( showTextInputDialog('Filter', [], self.ui.input_suche.text()))
 
-    def updateAlteBelege(self, foobar=None):
+    def updateAlteVorgaenge(self, foobar=None):
+        button_alle = True
         self.year = str(self.ui.combo_year.currentText()).strip()
+        if hasattr(self, 'speicher'):
+            del self.speicher
+        self.speicher = Speicher(self.year)
+        self.ui.textBrowser.clear()
+        self.__invoicelist = []
         if self.__last10:
             self.__invoicelist = self.mainwindow.letzte_belege
-        else:
-            if hasattr(self, 'speicher'):
-                del self.speicher
-            self.speicher = Speicher(self.year)
-            self.ui.textBrowser.clear()
-            self.__invoicelist = []
+            button_alle = False
+        elif self.__extended:
             if self.filter_kunde:
-                self.__invoicelist = self.speicher.listBelegeByKunde(self.filter_kunde)
-            elif not self.__extended:
-                self.__invoicelist = self.speicher.listBelegeUnbezahlt()
-            if self.__showall and self.__extended and not self.filter_kunde:
+                self.__invoicelist = self.speicher.listVorgaengeByKunde(self.filter_kunde)
+                button_alle = False
+            elif self.__showall:
+                button_alle = False
                 self.__showall = False
                 if self.__invoicelist_sorting == 'DateDesc':
-                    self.__invoicelist = self.speicher.listBelegeByDateDesc()
+                    self.__invoicelist = self.speicher.listVorgaengeByDateDesc()
                 elif self.__invoicelist_sorting == 'DateAsc':
-                    self.__invoicelist = self.speicher.listBelegeByDateAsc()
+                    self.__invoicelist = self.speicher.listVorgaengeByDateAsc()
                 elif self.__invoicelist_sorting == 'Name':
-                    self.__invoicelist = self.speicher.listBelegeByName()
+                    self.__invoicelist = self.speicher.listVorgaengeByName()
                 elif self.__invoicelist_sorting == 'Amount':
-                    self.__invoicelist = self.speicher.listBelegeByAmount()
+                    self.__invoicelist = self.speicher.listVorgaengeByAmount()
                 else:
-                    self.__invoicelist = self.speicher.listBelege()
-
+                    self.__invoicelist = self.speicher.listVorgaenge()
+            else:
+                # Erweitert aber kein Alles anzeigen und kein Kundenfilter
+                # => Unbezahlte und zurückgestellte und Show-All-Bbutton
+                self.__invoicelist = self.speicher.listVorgaengeUnbezahlt(postponed=True)
+                button_alle = True
+        else:
+            # Nicht erweitert
+            # => Unbezahlte
+            self.__invoicelist = self.speicher.listVorgaengeUnbezahlt()
+            button_alle = False
+            
+        self.ui.listWidget_2.clear()
         if self.filter_kunde and not self.__invoicelist:
             label = QtWidgets.QLabel("Keine Ergebnisse")
-            self.ui.listWidget_2.clear()
             item = QtWidgets.QListWidgetItem()
             item.setSizeHint(QtCore.QSize(self.ui.listWidget_2.size().width() - 40, 100))
             self.ui.listWidget_2.addItem(item)
             self.ui.listWidget_2.setItemWidget(item, label)
-        elif not self.__invoicelist and self.__extended and not self.__last10:
-            button_showall = QtWidgets.QPushButton("Alle Belege anzeigen")
-            button_showall.clicked.connect(self.showall)
-            self.ui.listWidget_2.clear()
-            item = QtWidgets.QListWidgetItem()
-            item.setSizeHint(QtCore.QSize(self.ui.listWidget_2.size().width() - 40, 100))
-            self.ui.listWidget_2.addItem(item)
-            self.ui.listWidget_2.setItemWidget(item, button_showall)
         else:
-            self.ui.listWidget_2.clear()
             for inv in self.__invoicelist:
-                entry = AbfuellungWidget(inv)
+                entry = AbfuellungWidget(inv, extended=(self.__extended or self.__last10))
+                entry.anrufenClicked.connect(self.anrufSlot(inv))
+                entry.menuClicked.connect(self.menuSlot(inv))
                 item = QtWidgets.QListWidgetItem()
                 item.setSizeHint(QtCore.QSize(self.ui.listWidget_2.size().width() - 40, 68))
                 self.ui.listWidget_2.addItem(item)
                 self.ui.listWidget_2.setItemWidget(item, entry)
-        self.belegAusgewaehlt()
+
+        if button_alle:
+            button_showall = QtWidgets.QPushButton("Alle Vorgänge anzeigen")
+            button_showall.clicked.connect(self.showall)
+            item = QtWidgets.QListWidgetItem()
+            item.setSizeHint(QtCore.QSize(self.ui.listWidget_2.size().width() - 40, 100))
+            self.ui.listWidget_2.addItem(item)
+            self.ui.listWidget_2.setItemWidget(item, button_showall)
+        
+        self.vorgangAusgewaehlt()
+
+    def menuSlot(self, invoice):
+        def _menu():
+            self.showMenu(invoice=invoice)
+        return _menu
+
+    def anrufSlot(self, invoice):
+        def _anruf():
+            self.anrufen(invoice=invoice)
+        return _anruf
+
+    def showMenu(self, invoice=None):
+        self.__menu = True
+        self.update()
+        self.vorgangAusgewaehlt(invoice=invoice)
 
     def showall(self):
         self.__showall = True
-        self.updateAlteBelege()
+        self.updateAlteVorgaenge()
 
     def extended(self):
-        if self.__extended:
-            self.mainwindow.showWidget('history')
-        else:
-            self.mainwindow.showWidget('history_complete')
+        self.__menu = False
+        self.__extended = self.ui.button_extended.isChecked()
+        self.__aktueller_vorgang = None
+        self.update()
 
     def listedrucken(self):
-        belege = []
+        vorgaenge = []
         for inv in self.__invoicelist:
-            belege.append(inv)
-        if len(belege) > 20:
+            vorgaenge.append(inv)
+        if len(vorgaenge) > 20:
             if (QtWidgets.QMessageBox.No ==
-                QtWidgets.QMessageBox.warning(self, u'Wirklich Liste drucken?', 'Momentan sind %i Kunden auf der Liste.\nIst das korrekt?' % len(belege), buttons=QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No, defaultButton=QtWidgets.QMessageBox.No)):
+                QtWidgets.QMessageBox.warning(self, u'Wirklich Liste drucken?', 'Momentan sind %i Kunden auf der Liste.\nIst das korrekt?' % len(vorgaenge), buttons=QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No, defaultButton=QtWidgets.QMessageBox.No)):
                 return False
-        if not BeleglisteThermo(belege, self.mainwindow.printer):
+        if not BeleglisteThermo(vorgaenge, self.mainwindow.printer):
             QtWidgets.QMessageBox.warning(self, u'Fehler beim Drucken', 'Drucker nicht angeschlossen, nicht eingeschaltet oder Rechte falsch?', buttons=QtWidgets.QMessageBox.Ok, defaultButton=QtWidgets.QMessageBox.Ok)
 
 
     def updateVersionen(self, handle):
         l = self.ui.listWidget_version
         l.clear()
-        versionen = self.speicher.getBelegVersionen(handle)
+        versionen = self.speicher.getVorgangVersionen(handle)
         versionsnummern = list(versionen.keys())
         versionsnummern.sort(reverse=True)
         newest = max(versionsnummern)
@@ -240,188 +290,175 @@ class WidgetHistory(QtWidgets.QWidget):
 
 
     def versionAusgewaehlt(self, listWidgetItem = None, nonsense = None):
+        invoice = self.__aktueller_vorgang
         if not listWidgetItem:
             return None
         version = int(listWidgetItem.data(1))
         if version:
-            invoice = self.ui.listWidget_2.itemWidget(self.ui.listWidget_2.selectedItems()[0]).getBeleg()
+            if not invoice:
+                invoice = self.ui.listWidget_2.itemWidget(self.ui.listWidget_2.selectedItems()[0]).getVorgang()
             handle = invoice.ID
-            invoice = self.speicher.ladeBeleg(handle, version=version)
+            invoice = self.speicher.ladeVorgang(handle, version=version)
             text = BelegHTML(invoice, public=False)
             self.ui.textBrowser.setHtml(text)
+
+
+    def vorgangAusgewaehlt(self, listWidgetItem = None, nonsense = None, invoice=None):
+        if not invoice:
+            if len(self.ui.listWidget_2.selectedItems()) > 0:
+                if len(self.ui.listWidget_2.selectedItems()) > 1:
+                    invoice = Vorgang()
+                    zahlungen = False
+                    for selectedItem in self.ui.listWidget_2.selectedItems():
+                        tmp = self.speicher.ladeVorgang(self.ui.listWidget_2.itemWidget(selectedItem).getVorgang().ID)
+                        invoice.vorgangHinzufuegen(tmp)
+                        if tmp.getZahlungen():
+                            zahlungen = True
+                    self.ui.label_dateiname.setText(u'<em>Mehrere ausgewählt</em>')
+                    if not zahlungen:
+                        self.ui.button_sammelbeleg.show()
+                else:
+                    widget = self.ui.listWidget_2.itemWidget(self.ui.listWidget_2.selectedItems()[0])
+                    if type(widget) == AbfuellungWidget:
+                        invoice = self.speicher.ladeVorgang(widget.getVorgang().ID)
+                        self.ui.label_dateiname.setText('%s' % invoice.ID)
+                    self.ui.button_sammelbeleg.hide()
         
-
-
-    def belegAusgewaehlt(self, listWidgetItem = None, nonsense = None):
-        invoice = None
-        if len(self.ui.listWidget_2.selectedItems()) > 0:
-            if len(self.ui.listWidget_2.selectedItems()) > 1:
-                invoice = Beleg()
-                for selectedItem in self.ui.listWidget_2.selectedItems():
-                    tmp = self.speicher.ladeBeleg(self.ui.listWidget_2.itemWidget(selectedItem).getBeleg().ID)
-                    invoice.belegHinzufuegen(tmp)
-                self.ui.label_dateiname.setText(u'<em>Mehrere ausgewählt</em>')
-            else:
-                widget = self.ui.listWidget_2.itemWidget(self.ui.listWidget_2.selectedItems()[0])
-                if type(widget) == AbfuellungWidget:
-                    invoice = self.speicher.ladeBeleg(widget.getBeleg().ID)
-                    self.ui.label_dateiname.setText('%s' % invoice.ID)
-
         if invoice:
-            self.ui.button_belegdrucken.setEnabled(True)
-
-            self.ui.button_rechnung.setEnabled(True)
+            self.__aktueller_vorgang = invoice
             if invoice.isRechnung():
+                self.ui.button_anrufen.setEnabled(False)
                 self.ui.button_bearbeiten.setEnabled(False)
-                self.ui.button_rechnung.setText("Rechnung anzeigen")
                 self.ui.button_rechnung_storno.setEnabled(True)
-                self.ui.button_bio.setEnabled(True)
-                self.ui.button_bio.setChecked(invoice.isBio())
+                self.ui.button_beleganzeigen.setEnabled(True)
+                self.ui.button_bezahlt.setEnabled(False)
             else:
                 self.ui.button_bearbeiten.setEnabled(True)
-                self.ui.button_rechnung.setText("Rechnung ausstellen")
                 self.ui.button_rechnung_storno.setEnabled(False)
-                self.ui.button_bio.setEnabled(False)
-                self.ui.button_bio.setChecked(False)
+                self.ui.button_beleganzeigen.setEnabled(False)
+                self.ui.button_bezahlt.setEnabled(True)
+                self.ui.button_anrufen.setEnabled(True)
             
 
             text = BelegHTML(invoice, public=False)
             self.ui.textBrowser.setHtml(text)
 
             if invoice.ID:
-                # Wenn mehrere Belegen ausgewählt wurden, ist das False
+                # Wenn mehrere Belegen ausgewählt wurden, ist das None
                 self.ui.listWidget_version.show()
                 self.updateVersionen(invoice.ID)
             else:
                 self.ui.listWidget_version.hide()
+                self.ui.button_bezahlt.setEnabled(False)
+                self.ui.button_anrufen.setEnabled(False)
 
-
-            self.ui.button_ueberweisung.setEnabled(not invoice.getPayed())
-            label = u'wird überwiesen'
-            if invoice.getBanktransfer():
-                label = u'wird bar bezahlt'
-            self.ui.button_ueberweisung.setText(label)
-            
-
-            self.ui.button_bezahlt.setEnabled(not invoice.getBanktransfer())
             label = u'Ist bezahlt'
-            if invoice.getPayed():
+            if invoice.getPayed() and not invoice.isRechnung():
                 label = u'Ist noch nicht bezahlt'
             self.ui.button_bezahlt.setText(label)
 
+            if invoice.getStatus() == 'postponed':
+                self.ui.button_zurueckstellen.setText('Nicht mehr zurückstellen')
+            else:
+                self.ui.button_zurueckstellen.setText('Zurückstellen')
+            self.ui.button_zurueckstellen.setEnabled(not (invoice.getPayed() or invoice.getBanktransfer()))
+
             if self.year != str(datetime.date.today().year):
                 self.ui.button_bearbeiten.setEnabled(False)
+                self.ui.button_anrufen.setEnabled(False)
             if len(self.ui.listWidget_2.selectedItems()) > 1:
                 self.ui.button_bearbeiten.setEnabled(False)
+                self.ui.button_anrufen.setEnabled(False)
         else:
-            # Kein Beleg ausgewählt
+            # Kein Vorgang ausgewählt
             self.ui.textBrowser.clear()
             self.ui.listWidget_version.clear()
-            self.ui.button_ueberweisung.setEnabled(False)
-            self.ui.button_bio.setEnabled(False)
-            self.ui.button_bezahlt.setEnabled(False);
+            self.ui.button_anrufen.setEnabled(False)
+            self.ui.button_bezahlt.setEnabled(False)
             self.ui.button_bearbeiten.setEnabled(False)
-            self.ui.button_rechnung.setEnabled(False)
-            self.ui.button_belegdrucken.setEnabled(False)
-            self.ui.label_dateiname.setText(u'<em>Kein Beleg ausgewählt</em>') 
+            self.ui.button_beleganzeigen.setEnabled(False)
+            self.ui.button_zurueckstellen.setEnabled(False)
+            self.ui.label_dateiname.setText(u'<em>Kein Vorgang ausgewählt</em>') 
+            self.__aktueller_vorgang = None
 
-    def anrufen(self, listWidgetItem = None):
-        if not listWidgetItem:
-            listWidgetItem = self.ui.listWidget_2.currentItem()
-        invoice = self.ui.listWidget_2.itemWidget(listWidgetItem).getBeleg()
+    def anrufen(self, listWidgetItem = None, invoice = None):
+        if self.__aktueller_vorgang:
+            invoice = self.__aktueller_vorgang
+        if not invoice:
+            if not listWidgetItem:
+                listWidgetItem = self.ui.listWidget_2.currentItem()
+            invoice = self.ui.listWidget_2.itemWidget(listWidgetItem).getVorgang()
         dialog = DialogAnrufen(invoice)
         dialog.show()
         dialog.exec_()
-        self.updateAlteBelege()
-        
-    def belegOeffnen(self, listWidgetItem=None):
+        if self.__extended:
+            self.vorgangAusgewaehlt(invoice=invoice)
+        if self.__menu:
+            self.__menu = False
+            self.update()
+      
+    def zurueckstellen(self, listWidgetItem=None):  
         if not listWidgetItem:
             listWidgetItem = self.ui.listWidget_2.currentItem()
-        invoice = self.ui.listWidget_2.itemWidget(listWidgetItem).getBeleg()
-        if invoice.isRechnung():
-            QtWidgets.QMessageBox.warning(self, u'Fehler', u'Aus diesem Beleg wurde eine Rechnung erzeugt, daher kann daran nichts mehr geändert werden.', buttons=QtWidgets.QMessageBox.Ok, defaultButton=QtWidgets.QMessageBox.Ok)
-            return False
-        self.mainwindow.belegOeffnen(invoice)
-            
-
-    def belegKassieren(self, listWidgetItem=None):
-        if not listWidgetItem:
-            listWidgetItem = self.ui.listWidget_2.currentItem()
-        invoice = self.ui.listWidget_2.itemWidget(listWidgetItem).getBeleg()
-        self.mainwindow.belegKassieren(invoice)
-
-
-    def toggleUeberweisung(self):
-        item = self.ui.listWidget_2.currentItem()
-        if not item:
-            QtWidgets.QMessageBox.warning(self, u'Fehler', u'Kein Beleg ausgewählt', buttons=QtWidgets.QMessageBox.Ok, defaultButton=QtWidgets.QMessageBox.Ok)
-            return False
-
-        widget = self.ui.listWidget_2.itemWidget(item)
-        invoice = widget.getBeleg()
-        invoice.setBanktransfer(not invoice.getBanktransfer())
-        if invoice.getBanktransfer():
-            invoice.setPayed(False)
-        widget.update()
-        self.speicher.speichereBeleg(invoice)
-        self.belegAusgewaehlt(item)
-
-    def toggleBio(self):
-        item = self.ui.listWidget_2.currentItem()
-        if not item:
-            QtWidgets.QMessageBox.warning(self, u'Fehler', u'Kein Beleg ausgewählt', buttons=QtWidgets.QMessageBox.Ok, defaultButton=QtWidgets.QMessageBox.Ok)
-            return False
-
-        widget = self.ui.listWidget_2.itemWidget(item)
-        invoice = widget.getBeleg()
-        if invoice.isBio():
-            if QtWidgets.QMessageBox.warning(self, u'Kein BIO?', u'Diese Verarbeitung war doch kein BIO-Obst?.', buttons=QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.Cancel, defaultButton=QtWidgets.QMessageBox.Cancel) == QtWidgets.QMessageBox.Yes:
-                invoice.setBio(False)
-                self.speicher.speichereBeleg(invoice)
+        invoice = self.ui.listWidget_2.itemWidget(listWidgetItem).getVorgang()
+        if invoice.getStatus() == 'postponed':
+            invoice.setStatus(None)
         else:
-            reply = QtWidgets.QMessageBox.warning(self, u'BIO-Belege?', u'Bio-Beleg erstellen und drucken?\n\nJa = BIO-Beleg für diesen Vorgang drucken\nNein = Bio-Markierung setzen aber keinen Beleg drucken\nAbbrechen = War doch kein Bio', buttons=QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No | QtWidgets.QMessageBox.Cancel, defaultButton=QtWidgets.QMessageBox.Cancel)
-            if reply == QtWidgets.QMessageBox.Cancel:
-                return
-            elif reply == QtWidgets.QMessageBox.No:
-                invoice.setBio(True)
-                self.speicher.speichereBeleg(invoice)
-            elif reply == QtWidgets.QMessageBox.Yes:
-                invoice.setBio(True)
-                self.speicher.speichereBeleg(invoice)
-                filename = BioBeleg(invoice, filename='BIO_%s.pdf' % invoice.getRechnungsnummer())
-                print('Filename: %s' % filename)
-                c = cups.Connection()
-                c.printFile(c.getDefault(), filename, 'Bio-Beleg %s' % invoice.getRechnungsnummer(), PRINTER_OPTIONS)
-        self.updateAlteBelege()
-
+            invoice.setStatus('postponed')
+        self.speicher.speichereVorgang(invoice)
+        if self.__extended:
+            self.vorgangAusgewaehlt(invoice=invoice)
+        if self.__menu:
+            self.__menu = False
+            self.update()
+        
+        
+    def vorgangOeffnen(self, listWidgetItem=None):
+        if not listWidgetItem:
+            listWidgetItem = self.ui.listWidget_2.currentItem()
+        invoice = self.ui.listWidget_2.itemWidget(listWidgetItem).getVorgang()
+        if invoice.isRechnung():
+            QtWidgets.QMessageBox.warning(self, u'Fehler', u'Aus diesem Vorgang wurde eine Rechnung erzeugt, daher kann daran nichts mehr geändert werden.', buttons=QtWidgets.QMessageBox.Ok, defaultButton=QtWidgets.QMessageBox.Ok)
+            return False
+        self.mainwindow.vorgangOeffnen(invoice)
             
+
+    def vorgangKassieren(self, listWidgetItem=None):
+        invoice = self.__aktueller_vorgang
+        if not invoice:
+            if not listWidgetItem:
+                listWidgetItem = self.ui.listWidget_2.currentItem()
+            invoice = self.ui.listWidget_2.itemWidget(listWidgetItem).getVorgang()
+        if invoice.originale and not invoice.ID:
+            self.speicher.speichereVorgang(invoice)
+            for handle in invoice.originale:
+                old = self.speicher.ladeVorgang(handle)
+                self.speicher.loescheVorgang(old)
+        self.mainwindow.vorgangKassieren(invoice)
 
 
     def toggleBezahlt(self):
         item = self.ui.listWidget_2.currentItem()
         if not item:
-            QtWidgets.QMessageBox.warning(self, u'Fehler', u'Kein Beleg ausgewählt', buttons=QtWidgets.QMessageBox.Ok, defaultButton=QtWidgets.QMessageBox.Ok)
+            QtWidgets.QMessageBox.warning(self, u'Fehler', u'Kein Vorgang ausgewählt', buttons=QtWidgets.QMessageBox.Ok, defaultButton=QtWidgets.QMessageBox.Ok)
             return False
 
         widget = self.ui.listWidget_2.itemWidget(item)
-        invoice = widget.getBeleg()
-        if invoice.getPayed():
-            # Stornobuchung
-            zahlbetrag = 0.0
-            for z in self.speicher.getZahlungen(invoice):
-                zahlbetrag += z['betrag']
-            if zahlbetrag > 0.0:
-                self.speicher.speichereZahlung(invoice, 'bar', -zahlbetrag, 'Beleg auf "unbezahlt" gesetzt')
+        invoice = widget.getVorgang()
         invoice.setPayed(not invoice.getPayed())
         if invoice.getPayed():
             invoice.setBanktransfer(False)
         widget.update()
-        self.speicher.speichereBeleg(invoice)
-        self.belegAusgewaehlt(item)
+        self.speicher.speichereVorgang(invoice)
+        if self.__extended:
+            self.vorgangAusgewaehlt(invoice=invoice)
+        if self.__menu:
+            self.__menu = False
+            self.update()
 
 
     def reload(self):
-        self.updateAlteBelege()
+        self.updateAlteVorgaenge()
         
 
     def sortingChanged(self, newSortingIndex):
@@ -433,28 +470,25 @@ class WidgetHistory(QtWidgets.QWidget):
             self.__invoicelist_sorting = 'Name'
         elif newSortingIndex == 3:
             self.__invoicelist_sorting = 'Amount'
-        self.updateAlteBelege()
+        self.updateAlteVorgaenge()
 
-    def belegDruckenThermo(self):
+    def belegAnzeigen(self):
         item = self.ui.listWidget_2.currentItem()
-        if not item:
-            QtWidgets.QMessageBox.warning(self, u'Fehler', u'Kein Beleg ausgewählt', buttons=QtWidgets.QMessageBox.Ok, defaultButton=QtWidgets.QMessageBox.Ok)
+        if not item or len(self.ui.listWidget_2.selectedItems()) > 1:
+            QtWidgets.QMessageBox.warning(self, u'Fehler', u'Bitte genau einen Vorgang auswählen', buttons=QtWidgets.QMessageBox.Ok, defaultButton=QtWidgets.QMessageBox.Ok)
             return False
 
         if item:
-            invoice = None
-            if len(self.ui.listWidget_2.selectedItems()) > 1:
-                invoice = Beleg()
-                for selectedItem in self.ui.listWidget_2.selectedItems():
-                    tmp = self.ui.listWidget_2.itemWidget(selectedItem).getBeleg()
-                    invoice.belegHinzufuegen(tmp)
-            else:
-                invoice = self.ui.listWidget_2.itemWidget(item).getBeleg()
+            invoice = self.ui.listWidget_2.itemWidget(item).getVorgang()
 
-            if not BelegThermo(invoice, self.mainwindow.printer):
-                QtWidgets.QMessageBox.warning(self, u'Fehler beim Drucken', 'Drucker nicht angeschlossen, nicht eingeschaltet oder Rechte falsch?', buttons=QtWidgets.QMessageBox.Ok, defaultButton=QtWidgets.QMessageBox.Ok)
+            if not invoice.getRechnungsnummer():
+                # Gibt keinen Beleg
+                print('kein Beleg gefunden')
+                return
+            filename = 'daten/rechnungen/' + invoice.getRechnungsnummer() + '.pdf'
+            self.mainwindow.belegAnzeigen(filename)
 
-
+    
     def rechnungStornieren(self):
         item = self.ui.listWidget_2.currentItem()
         if not item:
@@ -465,58 +499,20 @@ class WidgetHistory(QtWidgets.QWidget):
             QtWidgets.QMessageBox.warning(self, u'Mehrere Belege ausgewählt', u'Rechnungen können nur einzeln storniert werden', buttons=QtWidgets.QMessageBox.Ok, defaultButton=QtWidgets.QMessageBox.Ok)
             return False
 
-        beleg = self.ui.listWidget_2.itemWidget(item).getBeleg()
-        if not beleg.isRechnung():
-            QtWidgets.QMessageBox.warning(self, u'Dies ist keine Rechnung', u'Dieser Beleg repräsentiert keine Rechnung.', buttons=QtWidgets.QMessageBox.Ok, defaultButton=QtWidgets.QMessageBox.Ok)
+        vorgang = self.ui.listWidget_2.itemWidget(item).getVorgang()
+        if not vorgang.isRechnung():
+            QtWidgets.QMessageBox.warning(self, u'Dies ist keine Rechnung', u'Dieser Vorgang repräsentiert keine Rechnung.', buttons=QtWidgets.QMessageBox.Ok, defaultButton=QtWidgets.QMessageBox.Ok)
             return False
 
-        rechnungsnr = beleg.getRechnungsnummer()
-        adresse = beleg.kunde.getAdresse()
+        rechnungsnr = vorgang.getRechnungsnummer()
+        kb = self.speicher.getKassenbeleg(renr=rechnungsnr)
+        adresse = kb['kunde']['adresse']
         if QtWidgets.QMessageBox.Yes == QtWidgets.QMessageBox.question(self, u'Rechnung Stornieren', u'Die Rechnung Nr.<br/><strong>%s</strong><br/>an<br />%s<br/>soll storniert werden. Ist das okay?' % (rechnungsnr, adresse), buttons=QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No, defaultButton=QtWidgets.QMessageBox.No):
-            storniereRechnung(beleg)
-        self.updateAlteBelege()
+            # FIXME: Erstelle Gegenbuchung
+            filename = KassenbelegStornieren(kb)
+        self.updateAlteVorgaenge()
 
     
-    def rechnungAusBeleg(self):
-        item = self.ui.listWidget_2.currentItem()
-        if not item:
-            QtWidgets.QMessageBox.warning(self, u'Fehler', u'Keine Rechnung ausgewählt', buttons=QtWidgets.QMessageBox.Ok, defaultButton=QtWidgets.QMessageBox.Ok)
-            return False
-
-        originale = []
-        beleg = None
-        if len(self.ui.listWidget_2.selectedItems()) > 1:
-            QtWidgets.QMessageBox.warning(self, u'Mehrere Belege ausgewählt', u'Die Posten der einzelnen Belege werden zusammengefasst', buttons=QtWidgets.QMessageBox.Ok, defaultButton=QtWidgets.QMessageBox.Ok)
-            beleg = Beleg()
-            for selectedItem in self.ui.listWidget_2.selectedItems():
-                tmp = self.ui.listWidget_2.itemWidget(selectedItem).getBeleg()
-                if tmp.isRechnung():
-                    QtWidgets.QMessageBox.warning(self, u'Wiederholte Rechnung', u'Mindestens einer der beteiligten Belege wurde schon in eine Rechnung übernommen.', buttons=QtWidgets.QMessageBox.Ok, defaultButton=QtWidgets.QMessageBox.Ok)
-                    return False
-                originale.append(tmp)
-                beleg.belegHinzufuegen(tmp)
-        else: 
-            beleg = self.ui.listWidget_2.itemWidget(item).getBeleg()
-            originale.append(beleg)
-
-        
-        if beleg.isRechnung():
-            filename = rechnungsPDFDatei(beleg)
-            if filename is None:
-                QtWidgets.QMessageBox.warning(self, u'Fehler', u'Rechnungsdatei ist kaputt!', buttons=QtWidgets.QMessageBox.Ok, defaultButton=QtWidgets.QMessageBox.Ok)
-                return False            
-            if not os.path.exists(filename):
-                QtWidgets.QMessageBox.warning(self, u'Fehler', u'Rechnungsdatei nicht gefunden!', buttons=QtWidgets.QMessageBox.Ok, defaultButton=QtWidgets.QMessageBox.Ok)
-                return False
-            if 0 != subprocess.call(['/usr/bin/xdg-open', filename], shell=False, stderr=open('/dev/null', 'a')):
-                QtWidgets.QMessageBox.warning(self, u'Fehler', u'Fehler beim Öffnen der PDF-Datei!', buttons=QtWidgets.QMessageBox.Ok, defaultButton=QtWidgets.QMessageBox.Ok)
-                return False
-            return False
-
-        if showRechnungDialog(beleg, originale):
-            self.belegAusgewaehlt(item)
-            self.updateAlteBelege()
-
 
 
     def eventFilter(self, qobject, qevent):

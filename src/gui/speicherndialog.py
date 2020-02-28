@@ -38,31 +38,51 @@ class SpeichernDialog(QtWidgets.QDialog):
         self.showFullScreen()
         
         self.kunde_nimmt_mit = False
-        self.beleg = invoice
-        if not self.beleg.ID:
+        self.vorgang = invoice
+        if not self.vorgang.ID:
             self.ui.groupBox_ersetzen.setVisible(False)
-        if self.beleg.ID:
+        if self.vorgang.ID:
             self.ui.button_regalschild_ja.setChecked(False)
             self.ui.button_regalschild_nein.setChecked(True)
         self.ui.widget_regal.setVisible(True)
         self.ui.widget_regaldetails.setVisible(False)
         
+        self.ui.widget_bio.setVisible(False)
         self.ui.widget_biodetails.setVisible(False)
-        speicher = Speicher()
-        bio_lieferscheine = speicher.getBioLieferscheine()
-        self.bio_lieferscheine = {}
         
-        self.ui.combo_bioanlieferung.clear()
-        for l in bio_lieferscheine:
-            self.bio_lieferscheine[str(l['id'])] = l
-            kunde = l['adresse'].replace('\n', ',') 
-            if l['kunde']:
-                kunde = speicher.ladeKunde(l['kunde']).getName()
-                
-            if l['abholdatum'] == None:
-                obstart = ','.join([x.capitalize() for x in l['obstart'].keys() if l['obstart'][x]])
-                self.ui.combo_bioanlieferung.addItem("%s: %s, %s %s\n%s - %s" % (l['id'], l['anlieferdatum'], l['menge'], obstart, kunde, l['kontrollstelle']))
-        
+        self.isBio = False
+        if self.vorgang.kunde.isBio():
+            self.isBio = True
+            self.ui.widget_bio.setVisible(True)
+            self.ui.button_bio_ja.setChecked(True)
+            self.ui.button_bio_nein.setChecked(False)
+            self.ui.widget_biodetails.setVisible(True)
+            
+            speicher = Speicher()
+            bio_lieferscheine = speicher.getBioLieferscheine(kunde=self.vorgang.kunde, fertige=False)
+            # Wenn man einen Vorgang bearbeitet, der schon als Bio markiert ist, dann fliegt dieser 
+            # Liefeschein aus der Liste heraus weil schon benutzt. Das darf nicht dazu führen, 
+            # dass der Vorgang dann also nicht-bio markiert wird
+            if self.vorgang.isBio() and self.vorgang.getBioLieferschein():
+                l = speicher.ladeBioLieferschein(self.vorgang.getBioLieferschein())
+                bio_lieferscheine.insert(0, l)
+
+            self.bio_lieferscheine = {}
+            if len(bio_lieferscheine) == 0:
+                self.isBio = False
+                self.ui.widget_bio.setVisible(False)
+                self.ui.widget_biodetails.setVisible(False)
+            self.ui.combo_bioanlieferung.clear()
+            for l in bio_lieferscheine:
+                self.bio_lieferscheine[str(l['id'])] = l
+                kunde = l['adresse'].replace('\n', ',') 
+                if l['kunde']:
+                    kunde = speicher.ladeKunde(l['kunde']).getName()
+                    
+                if l['abholdatum'] == None:
+                    obstart = ','.join([x.capitalize() for x in l['obstart'].keys() if l['obstart'][x]])
+                    self.ui.combo_bioanlieferung.addItem("%s: %s, %s %s\n%s - %s" % (l['id'], l['anlieferdatum'], l['menge'], obstart, kunde, l['kontrollstelle']))
+            self.bioanlieferungChanged()
 
         
         self.ui.label_kundenname.clicked = self.kundennameClicked
@@ -99,7 +119,7 @@ class SpeichernDialog(QtWidgets.QDialog):
         self.update()
         
     def ok(self):
-        if self.beleg.getKundenname() == '':
+        if self.vorgang.getKundenname() == '':
             QtWidgets.QMessageBox.warning(self, u'Fehler', u'Kein Name eingegeben', buttons=QtWidgets.QMessageBox.Ok, defaultButton=QtWidgets.QMessageBox.Ok)
             return
         else:
@@ -115,32 +135,39 @@ class SpeichernDialog(QtWidgets.QDialog):
         self.ui.widget_regaldetails.setVisible(True)
         self.ui.button_regalschild_ja.setChecked(True)
 
-    def bioanlieferungChanged(self):
+    def gewaehlterBioLieferschein(self):
+        if not self.isBio:
+            return None
         daten = self.ui.combo_bioanlieferung.currentText()
         id = str(daten).split(':')[0]
         l = self.bio_lieferscheine[id]
-        self.beleg.setBio(True, l['kontrollstelle'], l['adresse'] )
+        return l
+
+    def bioanlieferungChanged(self):
+        l = self.gewaehlterBioLieferschein()
+        self.vorgang.setBio(True, l['kontrollstelle'], l['adresse'], l['id'])
 
     def bio(self):
+        self.isBio = True
         self.ui.widget_biodetails.setVisible(True)
         self.bioanlieferungChanged()
     
     def keinBio(self):
-        self.beleg.setBio(False)
+        self.isBio = False
+        self.vorgang.setBio(False)
         self.ui.widget_biodetails.setVisible(False)
-        self.ui.input_kontrollstelle.clear()
         
     def palettenClicked(self):
         if self.ui.button_1.isChecked():
-            self.beleg.setPaletten(1)
+            self.vorgang.setPaletten(1)
         elif self.ui.button_2.isChecked():
-            self.beleg.setPaletten(2)
+            self.vorgang.setPaletten(2)
         elif self.ui.button_3.isChecked():
-            self.beleg.setPaletten(3)
+            self.vorgang.setPaletten(3)
         elif self.ui.button_4.isChecked():
-            self.beleg.setPaletten(4)
+            self.vorgang.setPaletten(4)
         elif self.ui.button_5.isChecked():
-            self.beleg.setPaletten(5)
+            self.vorgang.setPaletten(5)
         
         
     def abholungClicked(self):
@@ -152,47 +179,47 @@ class SpeichernDialog(QtWidgets.QDialog):
             zeiten.append( dt.strftime('%H:%M') ) 
             dt += datetime.timedelta(minutes=30)
         zeiten.extend( ['Montag', 'Dienstag', 'Mittwoch', 'Donnerstag', 'Freitag', 'Samstag', 'Sonntag'])
-        self.beleg.setAbholung(showTextInputDialog('Abholung', zeiten, self.beleg.getAbholung()))  
+        self.vorgang.setAbholung(showTextInputDialog('Abholung', zeiten, self.vorgang.getAbholung()))  
         self.update()
         
     def kundennameClicked(self):
-        self.beleg.kunde = showKundenAuswahlDialog(self.beleg.kunde)
+        self.vorgang.kunde = showKundenAuswahlDialog(self.vorgang.kunde)
         self.update()
     
     def editKundendaten(self):
-        self.beleg.kunde = showKundendatenDialog(self.beleg.kunde)
+        self.vorgang.kunde = showKundendatenDialog(self.vorgang.kunde)
         s = Speicher()
-        s.speichereKunde(self.beleg.kunde)
+        s.speichereKunde(self.vorgang.kunde)
         self.update()
     
     def abholungEditingFinished(self):
-        self.beleg.setAbholung( str(self.ui.input_abholung.text()) )
+        self.vorgang.setAbholung( str(self.ui.input_abholung.text()) )
         self.update()
 
     def update(self):
-        if self.beleg.getKundenname():
-            self.ui.input_kundenname.setText(self.beleg.getKundenname())
-        if self.beleg.getAbholung():
-            self.ui.input_abholung.setText(self.beleg.getAbholung())
-        if self.beleg.getBio():
+        if self.vorgang.getKundenname():
+            self.ui.input_kundenname.setText(self.vorgang.getKundenname())
+        if self.vorgang.getAbholung():
+            self.ui.input_abholung.setText(self.vorgang.getAbholung())
+        if self.isBio:
             self.ui.button_bio_ja.setChecked(True)
             self.ui.widget_biodetails.setVisible(True)
         else:
             self.ui.button_bio_nein.setChecked(True)
             self.ui.widget_biodetails.setVisible(False)
-        if self.beleg.getPaletten() == 1:
+        if self.vorgang.getPaletten() == 1:
             self.ui.button_1.setChecked(True)
-        elif self.beleg.getPaletten() == 2:
+        elif self.vorgang.getPaletten() == 2:
             self.ui.button_2.setChecked(True)
-        elif self.beleg.getPaletten() == 3:
+        elif self.vorgang.getPaletten() == 3:
             self.ui.button_3.setChecked(True)
-        elif self.beleg.getPaletten() == 4:
+        elif self.vorgang.getPaletten() == 4:
             self.ui.button_4.setChecked(True)
-        elif self.beleg.getPaletten() == 5:
+        elif self.vorgang.getPaletten() == 5:
             self.ui.button_5.setChecked(True)
-        elif self.beleg.getPaletten() == 6:
+        elif self.vorgang.getPaletten() == 6:
             self.ui.button_6.setChecked(True)
-        if self.beleg.getKundenname() == '':
+        if self.vorgang.getKundenname() == '':
             self.ui.input_kundenname.setStyleSheet('border-color: red; background-color: #faa;')
             self.ui.button_ok.setEnabled(False)
             self.ui.button_mitnehmen.setEnabled(False)
@@ -205,7 +232,7 @@ class SpeichernDialog(QtWidgets.QDialog):
         return self.ui.button_regalschild_ja.isChecked()
         
     def speicherungErsetzen(self):
-        if self.beleg.ID == None:
+        if self.vorgang.ID == None:
             return True
         return self.ui.button_ersetzen.isChecked()
         

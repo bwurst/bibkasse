@@ -19,7 +19,7 @@
 import datetime
 
 
-class BelegEintrag(object):
+class VorgangEintrag(object):
     
     def __init__(self, invoice, anzahl, preislistenID = None, beschreibung = None, einzelpreis = None, 
                  liter_pro_einheit = None, einheit = None, preisliste_link = True, steuersatz = None, datum = None, 
@@ -316,13 +316,15 @@ class BelegEintrag(object):
             belegzeit = self.__invoice.getZeitpunkt()
             if belegzeit:
                 wert = belegzeit.date()
+        if not wert:
+            wert = datetime.date.today()
         return wert
     
     def setDatum(self, datum):
         self._setzeWert('datum', datum)
 
     def __str__(self):
-        s = 'BelegEintrag #%s\n' % self.getID()
+        s = 'VorgangEintrag #%s\n' % self.getID()
         s += '%s (=> %i Liter)\n' % (self.getBeschreibung(), self.getLiterzahl())
         s += '%.2f %s * %.2f = %.2f\n' % (self.getStueckzahl(), self.getEinheit(), self.getPreis(), self.getSumme())
         s += 'Auto-Update: %s\n' % self.autoupdate
@@ -337,8 +339,8 @@ class BelegEintrag(object):
         
             
 if __name__ == '__main__':
-    from Beleg import Beleg 
-    invoice = Beleg()
+    from Vorgang import Vorgang 
+    invoice = Vorgang()
     my5er = invoice.newItem(20, '5er')
     invoice.newItem(20, '10er')
     invoice.newItem(10, '5er_gebraucht')

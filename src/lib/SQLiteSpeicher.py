@@ -26,10 +26,10 @@ KEY_VALIDATE_FILE = 'daten/key_validate.dat'
 OLD_CODEFILE = 'daten/pincode'
 USERS_FILE = 'daten/users.xml'
 
-BELEG_FIELDLIST = "id,handle,version,timestamp,zeitpunkt,user,kunde,name,adresse,abholung,telefon,paletten,rechnungsnummer,rechnungsdatum,zahlung,bezahlt,summe,liter,manuelle_liter,bio,bio_kontrollstelle,bio_lieferant,status"
+VORGANG_FIELDLIST = "id,handle,version,timestamp,zeitpunkt,originale,user,kunde,name,adresse,abholung,telefon,paletten,rechnungsnummer,rechnungsdatum,zahlung,bezahlt,summe,liter,manuelle_liter,bio,bio_kontrollstelle,bio_lieferant,bio_lieferschein,status"
 AUFTRAG_FIELDLIST = "handle, version, currentversion, timestamp, user, kunde, erledigt, abholung, quelle, obst, obstmenge, obstart, angeliefert, lieferart, gbcount, kennz, gebrauchte, neue, neue3er, neue5er, neue10er, sonstiges, frischsaft, telefon, zeitpunkt, status, anmerkungen, bio, bio_lieferschein"
 
-from lib.Beleg import Beleg
+from lib.Vorgang import Vorgang
 from lib.Kunde import Kunde
 from lib.Auftrag import Auftrag, StatusOffen
 
@@ -40,6 +40,7 @@ import sqlite3
 
 import time 
 
+import json
 import base64
 from hashlib import sha256
 from Crypto.Cipher import AES
@@ -89,7 +90,7 @@ class SQLiteSpeicherBackend(object):
             return
         if not existing and not self.encfs.mounted:
             raise ValueError('storage not unlocked!')
-        self.dbconn = sqlite3.connect(os.path.join(self.storage_location, '%s.sqlite' % year), check_same_thread=False) # @UndefinedVariable
+        self.dbconn = sqlite3.connect(os.path.join(self.storage_location, '%s.sqlite' % year), check_same_thread=False, detect_types=sqlite3.PARSE_DECLTYPES) # @UndefinedVariable
         self.dbconn.row_factory = sqlite3.Row # @UndefinedVariable
         self.db = self.dbconn.cursor()
         if not existing:
@@ -101,7 +102,7 @@ class SQLiteSpeicherBackend(object):
             return
         if not existing and not self.encfs.mounted:
             raise ValueError('storage not unlocked!')
-        self.dbconn_kunden = sqlite3.connect(os.path.join(self.storage_location, 'kunden.sqlite'), check_same_thread=False) # @UndefinedVariable
+        self.dbconn_kunden = sqlite3.connect(os.path.join(self.storage_location, 'kunden.sqlite'), check_same_thread=False, detect_types=sqlite3.PARSE_DECLTYPES) # @UndefinedVariable
         self.dbconn_kunden.row_factory = sqlite3.Row # @UndefinedVariable
         self.db_kunden = self.dbconn_kunden.cursor()
         if not existing:
@@ -109,7 +110,36 @@ class SQLiteSpeicherBackend(object):
             self.newKundenDB()
         self.checkDBchanges()
 
+
+    def delete_column_from_table(self, table, column):
+        self.db.execute('PRAGMA table_info("%s")' % (table,))
+        rows = self.db.fetchall()
+        field_decl = []
+        columns = []
+        for row in rows:
+            if row['name'] != column:
+                columns.append(row['name'])
+                pk = ''
+                if row['pk'] == 1:
+                    pk = 'PRIMARY KEY'
+                    if row['type'] == 'INTEGER':
+                        pk += ' AUTOINCREMENT'
+                null = 'NULL'
+                if row['notnull'] == 1:
+                    null = 'NOT NULL'
+                default = ''
+                if row['dflt_value']:
+                    default = 'DEFAULT %s' % row['dflt_value']
+                field_decl.append('"%s" %s %s %s %s' % (row['name'], row['type'], pk, null, default))
+        create_stmt = 'CREATE TABLE "%s_temp" (%s)' % (table, ',\n'.join(field_decl))
+        self.db.execute(create_stmt)
+        self.db.execute('INSERT INTO "%s_temp" SELECT %s FROM "%s"' % (table, ','.join(columns), table))
+        self.db.execute('DROP TABLE "%s"' % (table,))
+        self.db.execute('ALTER TABLE "%s_temp" RENAME TO "%s"' % (table, table))
+
+
     def checkDBchanges(self):
+        rename_beleg_to_vorgang = False
         self.db.execute('''PRAGMA table_info("posten")''')
         rows = self.db.fetchall()
         steuersatz = False
@@ -121,14 +151,24 @@ class SQLiteSpeicherBackend(object):
                 steuersatz = True
         if not datum:
             self.db.execute('''ALTER TABLE "posten" ADD COLUMN "datum" DATE''')
-            self.db.execute('''UPDATE "posten" SET datum=(SELECT DATE(zeitpunkt) FROM beleg WHERE id=posten.beleg)''')
+            self.db.execute('''UPDATE "posten" SET datum=(SELECT DATE(zeitpunkt) FROM vorgang WHERE id=posten.vorgang)''')
             self.dbconn.commit()
         if not steuersatz:
             self.db.execute('''ALTER TABLE "posten" ADD COLUMN "steuersatz" FLOAT''')
             self.db.execute('''UPDATE "posten" SET steuersatz=NULL''')
             self.dbconn.commit()
         
-        self.db.execute('''PRAGMA table_info("beleg")''')
+        self.db.execute('''PRAGMA table_info("vorgang")''')
+        rows = self.db.fetchall()
+        if not rows:
+            # Änderung von "beleg" auf "vorgang" #FIXME
+            self.db.execute('''ALTER TABLE "beleg" RENAME TO "vorgang"''')
+            self.db.execute('''ALTER TABLE "posten" ADD COLUMN "vorgang" INTEGER NOT NULL''')
+            self.db.execute('''UPDATE "posten" SET "vorgang"="beleg"''')
+            self.delete_column_from_table("posten", "beleg")
+            self.dbconn.commit()
+            rename_beleg_to_vorgang = True
+        self.db.execute('''PRAGMA table_info("vorgang")''')
         rows = self.db.fetchall()
         telefon = False
         currentversion = False
@@ -136,7 +176,9 @@ class SQLiteSpeicherBackend(object):
         bio = False
         bio_kontrollstelle = False
         bio_lieferant = False
+        bio_lieferschein = False
         kunde = False
+        originale = False
         for row in rows:
             if row['name'] == "telefon":
                 telefon = True
@@ -150,46 +192,134 @@ class SQLiteSpeicherBackend(object):
                 bio_kontrollstelle = True
             if row['name'] == "bio_lieferant":
                 bio_lieferant = True
+            if row['name'] == "bio_lieferschein":
+                bio_lieferschein = True
             if row['name'] == "kunde":
                 kunde = True
+            if row['name'] == 'originale':
+                originale = True
         if not telefon:
-            self.db.execute('''ALTER TABLE "beleg" ADD COLUMN "telefon" VARCHAR''')
+            self.db.execute('''ALTER TABLE "vorgang" ADD COLUMN "telefon" VARCHAR''')
         if not abgeholt:
-            self.db.execute('''ALTER TABLE "beleg" ADD COLUMN "abgeholt" BOOL DEFAULT 0''')
-            self.db.execute('''UPDATE "beleg" SET abgeholt=1 WHERE (zahlung='bar' AND bezahlt=1) OR zahlung='ueberweisung' ''')
+            self.db.execute('''ALTER TABLE "vorgang" ADD COLUMN "abgeholt" BOOL DEFAULT 0''')
+            self.db.execute('''UPDATE "vorgang" SET abgeholt=1 WHERE (zahlung='bar' AND bezahlt=1) OR zahlung='ueberweisung' ''')
             self.dbconn.commit()
         if not currentversion:
-            self.db.execute('''ALTER TABLE "beleg" ADD COLUMN "currentversion" BOOL DEFAULT FALSE''')
-            self.db.execute('''UPDATE "beleg" SET currentversion=(SELECT version==(SELECT max(version) FROM beleg WHERE handle=outer.handle) FROM "beleg" "outer" WHERE outer.id=beleg.id)''')
+            self.db.execute('''ALTER TABLE "vorgang" ADD COLUMN "currentversion" BOOL DEFAULT FALSE''')
+            self.db.execute('''UPDATE "vorgang" SET currentversion=(SELECT version==(SELECT max(version) FROM vorgang WHERE handle=outer.handle) FROM "vorgang" "outer" WHERE outer.id=vorgang.id)''')
             self.dbconn.commit()
         if not bio:
-            self.db.execute('''ALTER TABLE "beleg" ADD COLUMN "bio" BOOL DEFAULT 0''')
+            self.db.execute('''ALTER TABLE "vorgang" ADD COLUMN "bio" BOOL DEFAULT 0''')
         if not bio_kontrollstelle:
-            self.db.execute('''ALTER TABLE "beleg" ADD COLUMN "bio_kontrollstelle" VARCHAR''')
+            self.db.execute('''ALTER TABLE "vorgang" ADD COLUMN "bio_kontrollstelle" VARCHAR''')
         if not bio_lieferant:
-            self.db.execute('''ALTER TABLE "beleg" ADD COLUMN "bio_lieferant" TEXT''')
+            self.db.execute('''ALTER TABLE "vorgang" ADD COLUMN "bio_lieferant" TEXT''')
+        if not bio_lieferschein:
+            self.db.execute('''ALTER TABLE "vorgang" ADD COLUMN "bio_lieferschein" VARCHAR''')
         if not kunde:
-            self.db.execute('''ALTER TABLE "beleg" ADD COLUMN "kunde" INTEGER''')
+            self.db.execute('''ALTER TABLE "vorgang" ADD COLUMN "kunde" INTEGER''')
+        if not originale:
+            self.db.execute('''ALTER TABLE "vorgang" ADD COLUMN "originale" VARCHAR''')
             
         
         self.db.execute('''PRAGMA table_info("anruf")''')
         rows = self.db.fetchall()
         if not rows:
             self.db.execute('''CREATE TABLE "anruf" ("id" INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
-                                                     "beleg" VARCHAR NOT NULL,
-                                                     "timestamp" DATETIME NOT NULL  DEFAULT CURRENT_TIMESTAMP,
+                                                     "vorgang" VARCHAR NOT NULL,
+                                                     "timestamp" TIMESTAMP NOT NULL  DEFAULT CURRENT_TIMESTAMP,
                                                      "nummer" VARCHAR NOT NULL,
                                                      "ergebnis" VARCHAR,
                                                      "bemerkung" VARCHAR)''')
+        elif rename_beleg_to_vorgang:
+            self.db.execute('''ALTER TABLE "anruf" ADD COLUMN "vorgang"''')
+            self.db.execute('''UPDATE "anruf" SET "vorgang"="beleg"''')
+            self.delete_column_from_table("anruf", "beleg")
+            self.dbconn.commit()
+        self.db.execute('''PRAGMA table_info("kassenbeleg")''')
+        rows = self.db.fetchall()
+        if not rows:
+            self.db.execute('''CREATE TABLE "kassenbeleg" ("id" INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                                                           "vorgang" VARCHAR NULL,
+                                                           "vorgang_version" VARCHAR NULL,
+                                                           "timestamp" TIMESTAMP NOT NULL  DEFAULT CURRENT_TIMESTAMP,
+                                                           "redatum" DATE NULL,
+                                                           "renr" VARCHAR NULL, 
+                                                           "type" VARCHAR NOT NULL, 
+                                                           "tse_processtype" VARCHAR NULL, 
+                                                           "tse_processdata" VARCHAR NULL,
+                                                           "tse_time_start" INTEGER NULL,
+                                                           "tse_time_end" INTEGER NULL,
+                                                           "tse_trxnum" VARCHAR NULL,
+                                                           "tse_serial" VARCHAR NULL,
+                                                           "tse_sigcounter" INTEGER NULL,
+                                                           "tse_signature" VARCHAR NULL,
+                                                           "json_kunde" TEXT NULL,
+                                                           "json_posten" TEXT NULL,
+                                                           "json_summen" TEXT NULL,
+                                                           "json_zahlungen" TEXT NULL,
+                                                           "referenz" VARCHAR NULL,
+                                                           "brutto" BOOL NULL,
+                                                           "kassenbewegung" FLOAT NULL,
+                                                           "bemerkung" VARCHAR)''')
+        else:
+            referenz = False
+            for r in rows:
+                if r['name'] == 'referenz':
+                    referenz = True
+            if not referenz:
+                self.db.execute('''ALTER TABLE "kassenbeleg" ADD COLUMN "referenz" VARCHAR NULL''')
+        self.db.execute('''PRAGMA table_info("abschluss")''')
+        rows = self.db.fetchall()
+        if not rows:
+            self.db.execute('''CREATE TABLE "abschluss" ("id" INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                                                         "timestamp" TIMESTAMP NOT NULL  DEFAULT CURRENT_TIMESTAMP,
+                                                         "ersterbeleg" INT NULL,
+                                                         "letzterbeleg" INT NULL,
+                                                         "summe_brutto" FLOAT NULL,
+                                                         "summe_netto" FLOAT NULL,
+                                                         "summe_mwst" FLOAT NULL,
+                                                         "summe_bar" FLOAT NULL,
+                                                         "summe_transit" FLOAT NULL,
+                                                         "kassenstand" FLOAT NULL,
+                                                         "bemerkung" VARCHAR)''')
+        else:
+            transit = False
+            for r in rows:
+                if r['name'] == 'summe_transit':
+                    transit = True
+            if not transit:
+                self.db.execute('''ALTER TABLE "abschluss" ADD COLUMN "summe_transit" FLOAT NULL''')
         self.db.execute('''PRAGMA table_info("zahlung")''')
         rows = self.db.fetchall()
         if not rows:
             self.db.execute('''CREATE TABLE "zahlung" ("id" INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
-                                                       "beleg" VARCHAR NOT NULL,
-                                                       "timestamp" DATETIME NOT NULL  DEFAULT CURRENT_TIMESTAMP,
+                                                       "vorgang" VARCHAR NOT NULL,
+                                                       "timestamp" TIMESTAMP NOT NULL  DEFAULT CURRENT_TIMESTAMP,
+                                                       "tse_trxnum" INTEGET NULL,
                                                        "zahlart" VARCHAR NOT NULL,
                                                        "betrag" FLOAT,
+                                                       "gegeben" FLOAT,
+                                                       "zurueck" FLOAT,
                                                        "bemerkung" VARCHAR)''')
+        elif rename_beleg_to_vorgang:
+            self.db.execute('''ALTER TABLE "zahlung" ADD COLUMN "vorgang" INTEGER NOT NULL''')
+            self.db.execute('''UPDATE "zahlung" SET "vorgang"="beleg"''')
+            self.delete_column_from_table("zahlung", "beleg")
+            self.dbconn.commit()
+        trxnum = False
+        gegeben = False
+        for row in rows:
+            if row['name'] == "tse_trxnum":
+                trxnum = True
+            if row['name'] == "gegeben":
+                gegeben = True
+        if not trxnum:
+            self.db.execute('''ALTER TABLE "zahlung" ADD COLUMN "tse_trxnum" INTEGER''')
+        if not gegeben:
+            self.db.execute('''ALTER TABLE "zahlung" ADD COLUMN "gegeben" FLOAT''')
+            self.db.execute('''ALTER TABLE "zahlung" ADD COLUMN "zurueck" FLOAT''')
+
         self.db.execute('''PRAGMA table_info("bio_lieferschein")''')
         rows = self.db.fetchall()
         if not rows:
@@ -212,9 +342,9 @@ class SQLiteSpeicherBackend(object):
                 if row['name'] == 'kunde':
                     kunde = True
             if not anlieferdatum:
-                self.db.execute('''ALTER TABLE "bio_lieferschein" ADD COLUMN "anlieferdatum" VARCHAR''')
-                self.db.execute('''ALTER TABLE "bio_lieferschein" ADD COLUMN "produktionsdatum" VARCHAR''')
-                self.db.execute('''ALTER TABLE "bio_lieferschein" ADD COLUMN "abholdatum" VARCHAR''')
+                self.db.execute('''ALTER TABLE "bio_lieferschein" ADD COLUMN "anlieferdatum" DATE''')
+                self.db.execute('''ALTER TABLE "bio_lieferschein" ADD COLUMN "produktionsdatum" DATE''')
+                self.db.execute('''ALTER TABLE "bio_lieferschein" ADD COLUMN "abholdatum" DATE''')
             if not kunde:
                 self.db.execute('''ALTER TABLE "bio_lieferschein" ADD COLUMN "kunde" INTEGER''')
 
@@ -247,7 +377,7 @@ class SQLiteSpeicherBackend(object):
                                                         "handle" VARCHAR NOT NULL,
                                                         "version" INTEGER,
                                                         "currentversion" BOOL DEFAULT TRUE,
-                                                        "timestamp" DATETIME NOT NULL  DEFAULT CURRENT_TIMESTAMP,
+                                                        "timestamp" TIMESTAMP NOT NULL  DEFAULT CURRENT_TIMESTAMP,
                                                         "user" VARCHAR,
                                                         "kunde" INTEGER,
                                                         "erledigt" BOOL DEFAULT 0,
@@ -268,9 +398,9 @@ class SQLiteSpeicherBackend(object):
                                                         "sonstiges" TEXT,
                                                         "frischsaft" INTEGER,
                                                         "telefon" VARCHAR,
-                                                        "zeitpunkt" DATETIME,
+                                                        "zeitpunkt" TIMESTAMP,
                                                         "status" VARCHAR,
-                                                        anmerkungen TEXT,
+                                                        "anmerkungen" TEXT,
                                                         "bio" BOOL,
                                                         "bio_lieferschein" INTEGER)''')
         else:
@@ -285,19 +415,20 @@ class SQLiteSpeicherBackend(object):
                 if row['name'] == 'timestamp':
                     timestamp = True
             if not timestamp:
-                self.db.execute('''ALTER TABLE "auftrag" ADD COLUMN "timestamp" DATETIME''')
+                self.db.execute('''ALTER TABLE "auftrag" ADD COLUMN "timestamp" TIMESTAMP''')
                 self.db.execute('''ALTER TABLE "auftrag" ADD COLUMN "user" VARCHAR''')
 
 
 
     def newDB(self):
-        self.db.execute('''CREATE TABLE "beleg" ("id" INTEGER PRIMARY KEY  AUTOINCREMENT  NOT NULL  UNIQUE , 
+        self.db.execute('''CREATE TABLE "vorgang" ("id" INTEGER PRIMARY KEY  AUTOINCREMENT  NOT NULL  UNIQUE , 
                                                  "handle" varchar NOT NULL , 
                                                  "version" INTEGER NOT NULL , 
                                                  "currentversion" BOOL DEFAULT TRUE,
-                                                 "timestamp" DATETIME NOT NULL  DEFAULT CURRENT_TIMESTAMP, 
+                                                 "timestamp" TIMESTAMP NOT NULL  DEFAULT CURRENT_TIMESTAMP, 
                                                  "user" VARCHAR, 
-                                                 "zeitpunkt" DATETIME NOT NULL,
+                                                 "originale" VARCHAR, 
+                                                 "zeitpunkt" TIMESTAMP NOT NULL,
                                                  "kunde" INTEGER,
                                                  "name" VARCHAR, 
                                                  "adresse" TEXT, 
@@ -306,19 +437,20 @@ class SQLiteSpeicherBackend(object):
                                                  "telefon" VARCHAR,
                                                  "paletten" INTEGER, 
                                                  "rechnungsnummer" VARCHAR, 
-                                                 "rechnungsdatum" DATETIME, 
+                                                 "rechnungsdatum" DATE, 
                                                  "zahlung" VARCHAR, 
                                                  "bezahlt" BOOL, 
                                                  "summe" FLOAT, 
                                                  "liter" INTEGER, 
                                                  "manuelle_liter" INTEGER, 
                                                  "bio" BOOL DEFAULT 0,
+                                                 "bio_lieferschein" INTEGER,
                                                  "bio_kontrollstelle" VARCHAR,
                                                  "bio_kontrollnummer" VARCHAR,
                                                  "bio_lieferant" TEXT,
                                                  "status" VARCHAR)''')
         self.db.execute('''CREATE TABLE "posten" ("id" INTEGER PRIMARY KEY  AUTOINCREMENT  NOT NULL , 
-                                                  "beleg" INTEGER NOT NULL , 
+                                                  "vorgang" INTEGER NOT NULL , 
                                                   "preislisten_id" VARCHAR, 
                                                   "anzahl" FLOAT NOT NULL , 
                                                   "beschreibung" VARCHAR NOT NULL , 
@@ -327,17 +459,54 @@ class SQLiteSpeicherBackend(object):
                                                   "einheit" VARCHAR,
                                                   "datum" DATE, 
                                                   "steuersatz" FLOAT)''')
+        self.db.execute('''CREATE TABLE "kassenbeleg" ("id" INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                                                       "vorgang" VARCHAR NULL,
+                                                       "vorgang_version" VARCHAR NULL,
+                                                       "timestamp" TIMESTAMP NOT NULL  DEFAULT CURRENT_TIMESTAMP,
+                                                       "redatum" DATE NULL,
+                                                       "renr" VARCHAR NULL, 
+                                                       "type" VARCHAR NOT NULL, 
+                                                       "tse_processtype" VARCHAR NULL, 
+                                                       "tse_processdata" VARCHAR NULL,
+                                                       "tse_time_start" INTEGER NULL,
+                                                       "tse_time_end" INTEGER NULL,
+                                                       "tse_trxnum" VARCHAR NULL,
+                                                       "tse_serial" VARCHAR NULL,
+                                                       "tse_sigcounter" INTEGER NULL,
+                                                       "tse_signature" VARCHAR NULL,
+                                                       "json_kunde" TEXT NULL,
+                                                       "json_posten" TEXT NULL,
+                                                       "json_summen" TEXT NULL,
+                                                       "json_zahlungen" TEXT NULL,
+                                                       "referenz" VARCHAR NULL,
+                                                       "brutto" BOOL NULL,
+                                                       "kassenbewegung" FLOAT NULL,
+                                                       "bemerkung" VARCHAR)''')
+        self.db.execute('''CREATE TABLE "abschluss" ("id" INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                                                     "timestamp" TIMESTAMP NOT NULL  DEFAULT CURRENT_TIMESTAMP,
+                                                     "ersterbeleg" INT NULL,
+                                                     "letzterbeleg" INT NULL,
+                                                     "summe_brutto" FLOAT NULL,
+                                                     "summe_netto" FLOAT NULL,
+                                                     "summe_mwst" FLOAT NULL,
+                                                     "summe_bar" FLOAT NULL,
+                                                     "summe_transit" FLOAT NULL,
+                                                     "kassenstand" FLOAT NULL,
+                                                     "bemerkung" VARCHAR)''')
         self.db.execute('''CREATE TABLE "anruf" ("id" INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
-                                                 "beleg" VARCHAR NOT NULL,
-                                                 "timestamp" DATETIME NOT NULL  DEFAULT CURRENT_TIMESTAMP,
+                                                 "vorgang" VARCHAR NOT NULL,
+                                                 "timestamp" TIMESTAMP NOT NULL  DEFAULT CURRENT_TIMESTAMP,
                                                  "nummer" VARCHAR NOT NULL,
                                                  "ergebnis" VARCHAR,
                                                  "bemerkung" VARCHAR)''')
         self.db.execute('''CREATE TABLE "zahlung" ("id" INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
-                                                   "beleg" VARCHAR NOT NULL,
-                                                   "timestamp" DATETIME NOT NULL  DEFAULT CURRENT_TIMESTAMP,
+                                                   "vorgang" VARCHAR NOT NULL,
+                                                   "timestamp" TIMESTAMP NOT NULL  DEFAULT CURRENT_TIMESTAMP,
+                                                   "tse_trxnum" INTEGER NULL,
                                                    "zahlart" VARCHAR NOT NULL,
                                                    "betrag" FLOAT,
+                                                   "gegeben" FLOAT,
+                                                   "zurueck" FLOAT,
                                                    "bemerkung" VARCHAR)''')
         self.db.execute('''CREATE TABLE "bio_lieferschein" ("id" INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
                                                             "kunde" INTEGER,
@@ -353,7 +522,7 @@ class SQLiteSpeicherBackend(object):
                                                     "handle" VARCHAR NOT NULL,
                                                     "version" INTEGER,
                                                     "currentversion" BOOL DEFAULT TRUE,
-                                                    "timestamp" DATETIME NOT NULL  DEFAULT CURRENT_TIMESTAMP, 
+                                                    "timestamp" TIMESTAMP NOT NULL  DEFAULT CURRENT_TIMESTAMP, 
                                                     "user" VARCHAR, 
                                                     "kunde" INTEGER,
                                                     "erledigt" BOOL DEFAULT 0,
@@ -374,7 +543,7 @@ class SQLiteSpeicherBackend(object):
                                                     "sonstiges" TEXT,
                                                     "frischsaft" INTEGER,
                                                     "telefon" VARCHAR,
-                                                    "zeitpunkt" DATETIME,
+                                                    "zeitpunkt" TIMESTAMP,
                                                     "status" VARCHAR,
                                                     "anmerkungen" TEXT,
                                                     "bio" BOOL,
@@ -586,89 +755,92 @@ class SQLiteSpeicherBackend(object):
             self.store_key(newpassword)
             self.store_validation_file(newpassword)
 
-    def listBelege(self):
+    def listVorgaenge(self):
         ret = []
-        self.db.execute("SELECT %s FROM beleg where currentversion=1" % BELEG_FIELDLIST)
+        self.db.execute("SELECT %s FROM vorgang where currentversion=1" % VORGANG_FIELDLIST)
         stack = self.db.fetchall()
         for item in stack:
-            ret.append(self.ladeBeleg(sqlresult = item))
+            ret.append(self.ladeVorgang(sqlresult = item))
         return ret
         
-    def listBelegeUnbezahlt(self):
+    def listVorgaengeUnbezahlt(self, postponed=False):
         ret = []
-        self.db.execute("SELECT %s FROM beleg where currentversion=1 AND zahlung='bar' AND bezahlt=0 ORDER BY name" % BELEG_FIELDLIST)
+        if postponed:
+            self.db.execute("SELECT %s FROM vorgang where currentversion=1 AND zahlung='bar' AND bezahlt=0 ORDER BY name" % VORGANG_FIELDLIST)
+        else:
+            self.db.execute("SELECT %s FROM vorgang where currentversion=1 AND zahlung='bar' AND bezahlt=0 AND (status IS NULL OR status<>'postponed') ORDER BY name" % VORGANG_FIELDLIST)
         stack = self.db.fetchall()
         for item in stack:
-            ret.append(self.ladeBeleg(sqlresult = item))
+            ret.append(self.ladeVorgang(sqlresult = item))
         return ret
         
-    def listBelegeLastPayed(self, num = 8):
+    def listVorgaengeLastPayed(self, num = 8):
         ret = []
-        self.db.execute("SELECT %s FROM beleg where currentversion=1 AND bezahlt=1 ORDER BY timestamp DESC LIMIT ?" % BELEG_FIELDLIST, (num,))
+        self.db.execute("SELECT %s FROM vorgang where currentversion=1 AND bezahlt=1 ORDER BY timestamp DESC LIMIT ?" % VORGANG_FIELDLIST, (num,))
         stack = self.db.fetchall()
         for item in stack:
-            ret.append(self.ladeBeleg(sqlresult = item))
+            ret.append(self.ladeVorgang(sqlresult = item))
         return ret
         
-    def listBelegeByDateAsc(self):
+    def listVorgaengeByDateAsc(self):
         ret = []
-        self.db.execute("SELECT %s FROM beleg where currentversion=1 AND status IS NOT 'ignored' ORDER BY zeitpunkt ASC" % BELEG_FIELDLIST)
+        self.db.execute("SELECT %s FROM vorgang where currentversion=1 ORDER BY zeitpunkt ASC" % VORGANG_FIELDLIST)
         stack = self.db.fetchall()
         for item in stack:
-            ret.append(self.ladeBeleg(sqlresult = item))
+            ret.append(self.ladeVorgang(sqlresult = item))
         return ret
     
-    def listBelegeByDateDesc(self):
+    def listVorgaengeByDateDesc(self):
         ret = []
-        self.db.execute("SELECT %s FROM beleg where currentversion=1 AND status IS NOT 'ignored' ORDER BY zeitpunkt DESC" % BELEG_FIELDLIST)
+        self.db.execute("SELECT %s FROM vorgang where currentversion=1 ORDER BY zeitpunkt DESC" % VORGANG_FIELDLIST)
         stack = self.db.fetchall()
         for item in stack:
-            ret.append(self.ladeBeleg(sqlresult = item))
+            ret.append(self.ladeVorgang(sqlresult = item))
         return ret
     
-    def listBelegeByName(self):
+    def listVorgaengeByName(self):
         ret = []
-        self.db.execute("SELECT %s FROM beleg where currentversion=1 AND status IS NOT 'ignored' ORDER BY name ASC" % BELEG_FIELDLIST)
+        self.db.execute("SELECT %s FROM vorgang where currentversion=1 ORDER BY name ASC" % VORGANG_FIELDLIST)
         stack = self.db.fetchall()
         for item in stack:
-            ret.append(self.ladeBeleg(sqlresult = item))
+            ret.append(self.ladeVorgang(sqlresult = item))
         return ret
     
-    def listBelegeByKunde(self, kunde):
+    def listVorgaengeByKunde(self, kunde):
         ret = []
-        self.db.execute("SELECT %s FROM beleg where currentversion=1 AND kunde=?" % BELEG_FIELDLIST, (str(kunde),))
+        self.db.execute("SELECT %s FROM vorgang where currentversion=1 AND kunde=?" % VORGANG_FIELDLIST, (str(kunde),))
         stack = self.db.fetchall()
         for item in stack:
-            ret.append(self.ladeBeleg(sqlresult = item))
+            ret.append(self.ladeVorgang(sqlresult = item))
         return ret
     
-    def listBelegeByNameFilter(self, searchstring):
+    def listVorgaengeByNameFilter(self, searchstring):
         ret = []
         searchstring = '%'+searchstring+'%'
-        self.db.execute("SELECT %s FROM beleg where currentversion=1 AND name LIKE ? ORDER BY name ASC" % BELEG_FIELDLIST, (searchstring,))
+        self.db.execute("SELECT %s FROM vorgang where currentversion=1 AND name LIKE ? ORDER BY name ASC" % VORGANG_FIELDLIST, (searchstring,))
         stack = self.db.fetchall()
         for item in stack:
-            ret.append(self.ladeBeleg(sqlresult = item))
+            ret.append(self.ladeVorgang(sqlresult = item))
         return ret
     
-    def listBelegeByAmount(self):
+    def listVorgaengeByAmount(self):
         ret = []
-        self.db.execute("SELECT %s FROM beleg where currentversion=1 AND status IS NOT 'ignored' ORDER BY summe ASC" % BELEG_FIELDLIST)
+        self.db.execute("SELECT %s FROM vorgang where currentversion=1 ORDER BY summe ASC" % VORGANG_FIELDLIST)
         stack = self.db.fetchall()
         for item in stack:
-            ret.append(self.ladeBeleg(sqlresult = item))
+            ret.append(self.ladeVorgang(sqlresult = item))
         return ret
     
     def listeKundennamen(self):
         alteKunden = self.ladeAlteKundennamen()
-        self.db.execute("SELECT DISTINCT name FROM beleg")
+        self.db.execute("SELECT DISTINCT name FROM vorgang")
         aktuelleKunden = [item['name'] for item in self.db.fetchall() if item['name'] is not None]
         alleKundennamen = sorted(list(set(alteKunden + aktuelleKunden)))
         return alleKundennamen
 
     def listeRechnungsadressen(self):
         alteAdressen = self.ladeAlteRechnungsadressen() 
-        self.db.execute("SELECT DISTINCT adresse FROM beleg")
+        self.db.execute("SELECT DISTINCT adresse FROM vorgang")
         aktuelleAdressen = [item['adresse'] for item in self.db.fetchall() if item['adresse'] is not None]
         adressen = list(set(alteAdressen + aktuelleAdressen))
         return adressen
@@ -722,13 +894,13 @@ class SQLiteSpeicherBackend(object):
     
             
         
-    def getBeleg(self, handle):
-        return self.ladeBeleg(handle=handle)
+    def getVorgang(self, handle):
+        return self.ladeVorgang(handle=handle)
     
     
-    def getBelegVersionen(self, handle):
+    def getVorgangVersionen(self, handle):
         ret = {}
-        self.db.execute('SELECT version,timestamp,user FROM beleg WHERE handle=?', (handle,))
+        self.db.execute('SELECT version,timestamp,user FROM vorgang WHERE handle=?', (handle,))
         while True:
             one = self.db.fetchone()
             if not one:
@@ -737,194 +909,205 @@ class SQLiteSpeicherBackend(object):
         return ret
 
 
-    def ladeBeleg(self, handle=None, sqlresult=None, mitpreisliste = True, version=None):
+    def ladeVorgang(self, handle=None, sqlresult=None, mitpreisliste = True, version=None):
         # Lade alle Versionen
         if not self.db:
             raise RuntimeError('Datenbank nicht initialisiert')
         if handle:
             if version:
-                self.db.execute("SELECT %s FROM beleg AS outer where version=? AND handle=?" % BELEG_FIELDLIST, [version,handle,])
+                self.db.execute("SELECT %s FROM vorgang AS outer where version=? AND handle=?" % VORGANG_FIELDLIST, [version,handle,])
             else:
-                self.db.execute("SELECT %s FROM beleg AS outer where currentversion=1 AND handle=?" % BELEG_FIELDLIST, [handle,])
+                self.db.execute("SELECT %s FROM vorgang AS outer where currentversion=1 AND handle=?" % VORGANG_FIELDLIST, [handle,])
 
             sqlresult = self.db.fetchone()
             if not sqlresult:
-                raise ValueError("ladeBeleg() called with invalid handle %s" % handle)
+                raise ValueError("ladeVorgang() called with invalid handle %s" % handle)
             
         if not handle and not sqlresult:
-            raise ValueError("ladeBeleg() called without handle and withoud SQLresult")
+            raise ValueError("ladeVorgang() called without handle and withoud SQLresult")
 
         daten = sqlresult
 
-        i = Beleg()
+        vorgang = Vorgang()
 
         if not handle:
             handle = daten['handle'] 
                     
-        i.setID(daten['handle'])
-        i.setVersion(daten['version'])
+        vorgang.setID(daten['handle'])
+        vorgang.setVersion(daten['version'])
         if daten['kunde']:
-            i.kunde = self.ladeKunde(daten['kunde'])
+            vorgang.kunde = self.ladeKunde(daten['kunde'])
         else:
-            i.kunde = Kunde()
-            i.kunde.setName(daten['name'])
-            i.kunde.addKontakt('telefon',daten['telefon'])
-        #i.setAdresse(daten['adresse'])
-        i.setAbholung(daten['abholung'])
-        i.setPaletten(daten['paletten'])
-        i.setStatus(daten['status'])
-        i.setBio(bool(daten['bio']), daten['bio_kontrollstelle'], daten['bio_lieferant'])
+            vorgang.kunde = Kunde()
+            vorgang.kunde.setName(daten['name'])
+            vorgang.kunde.addKontakt('telefon',daten['telefon'])
+        #vorgang.setAdresse(daten['adresse'])
+        vorgang.setAbholung(daten['abholung'])
+        vorgang.setPaletten(daten['paletten'])
+        vorgang.setStatus(daten['status'])
+        vorgang.setBio(bool(daten['bio']), daten['bio_kontrollstelle'], daten['bio_lieferant'], daten['bio_lieferschein'])
         zeitpunkt = daten['zeitpunkt']
         if zeitpunkt:
-            i.setZeitpunkt(datetime.datetime.strptime(zeitpunkt, "%Y-%m-%d %H:%M:%S.%f"))
+            if type(zeitpunkt) == str:
+                zeitpunkt = datetime.datetime.strptime(zeitpunkt, "%Y-%m-%d %H:%M:%S.%f")
+            vorgang.setZeitpunkt(zeitpunkt)
 
         rechnungsnummer = daten['rechnungsnummer']
         if rechnungsnummer:
-            rechnungsdatum = datetime.datetime.strptime(daten['rechnungsdatum'], "%Y-%m-%d").date()
-            i.setRechnungsdaten(rechnungsdatum, rechnungsnummer)
+            rechnungsdatum = daten['rechnungsdatum']
+            if type(rechnungsdatum) == str:
+                rechnungsdatum = datetime.datetime.strptime(daten['rechnungsdatum'], "%Y-%m-%d").date()
+            vorgang.setRechnungsdaten(rechnungsdatum, rechnungsnummer)
 
-        i.setPayed(daten['bezahlt'])
-            
+        vorgang.setPayed(daten['bezahlt'])
+        if daten['originale']:
+            vorgang.originale = daten['originale'].split(',')
         zahlart = daten['zahlung']
         if zahlart == 'ec':
-            i.setPayedEC(True)
+            vorgang.setPayedEC(True)
         elif zahlart == 'ueberweisung':
-            i.setBanktransfer(True)
+            vorgang.setBanktransfer(True)
         
-        i.setManuelleLiterzahl( daten['manuelle_liter'] )
+        vorgang.setManuelleLiterzahl( daten['manuelle_liter'] )
         
-        self.db.execute("SELECT id,preislisten_id,anzahl,beschreibung,einzelpreis,liter_pro_einheit,einheit,steuersatz,datum FROM posten WHERE beleg=?", (daten['id'],))
+        self.db.execute("SELECT id,preislisten_id,anzahl,beschreibung,einzelpreis,liter_pro_einheit,einheit,steuersatz,datum FROM posten WHERE vorgang=?", (daten['id'],))
         while True:
             item = self.db.fetchone()
             if not item:
                 break 
-            if item['preislisten_id']:
-                i.newItem(anzahl = item['anzahl'], 
-                          preislistenID = item['preislisten_id'], 
-                          beschreibung = item['beschreibung'], 
-                          einzelpreis = item['einzelpreis'], 
-                          liter_pro_einheit = item['liter_pro_einheit'], 
-                          einheit = item['einheit'],
-                          steuersatz = item['steuersatz'],
-                          datum = item['datum'], 
-                          autoupdate = mitpreisliste)
-            else:
-                i.newItem(item['anzahl'], 
-                          None, 
-                          beschreibung = item['beschreibung'], 
-                          einzelpreis = item['einzelpreis'], 
-                          liter_pro_einheit = item['liter_pro_einheit'], 
-                          einheit = item['einheit'],
-                          steuersatz = item['steuersatz'],
-                          datum = item['datum'])
-        if mitpreisliste and round(i.getSumme(), 2) != round(float(daten['summe']), 2):
-            print ('%s: %.2f != %.2f, lade neu mit festen Preisen!' % (handle, i.getSumme(), float(daten['summe'])))
-            i = self.ladeBeleg(handle, mitpreisliste = False)
-            #print ('Abweichende Summe: %.2f != %.2f' % (round(i.getSumme(), 2), round(float(xml.find('invoice').attrib['summe']), 2)))
-        #if mitpreisliste and i.getLiterzahl() != float(xml.find('invoice').attrib['liter']):
+            vorgang.newItem(anzahl = item['anzahl'], 
+                      preislistenID = item['preislisten_id'], 
+                      beschreibung = item['beschreibung'], 
+                      einzelpreis = item['einzelpreis'], 
+                      liter_pro_einheit = item['liter_pro_einheit'], 
+                      einheit = item['einheit'],
+                      steuersatz = item['steuersatz'],
+                      datum = item['datum'], 
+                      autoupdate = mitpreisliste)
+        if mitpreisliste and round(vorgang.getSumme(), 2) != round(float(daten['summe']), 2):
+            print ('%s: %.2f != %.2f, lade neu mit festen Preisen!' % (handle, vorgang.getSumme(), float(daten['summe'])))
+            vorgang = self.ladeVorgang(handle, mitpreisliste = False)
+            #print ('Abweichende Summe: %.2f != %.2f' % (round(vorgang.getSumme(), 2), round(float(xml.find('invoice').attrib['summe']), 2)))
+        #if mitpreisliste and vorgang.getLiterzahl() != float(xml.find('invoice').attrib['liter']):
         #    print ('Abweichende Literzahl!')
         
-        zahlungen = self.getZahlungen(i)
+        zahlungen = self.getZahlungen(vorgang)
         for z in zahlungen:
-            i.addZahlung(z['timestamp'], z['zahlart'], z['betrag'], z['bemerkung'])
+            vorgang.zahlungen.append(z)
         
-        i.changed = False
-        return i
+        vorgang.changed = False
+        return vorgang
         
 
-    def speichereBeleg(self, rechnung, user=None, timestamp=None):
+    def speichereVorgang(self, vorgang, user=None, timestamp=None):
+        if vorgang.ID and not vorgang.changed:
+            print('Speichern nicht nötig!')
+            return
         username = self.__currentuser['name']
         if user:
             username = user
         if not timestamp:
             timestamp = datetime.datetime.now()
-        if not rechnung.ID:
-            rechnung.ID = self.makeid()
-        handle = rechnung.ID 
-        rechnung.setVersion(rechnung.getVersion() + 1)
-        if not rechnung.getZeitpunkt():
-            rechnung.setZeitpunkt(datetime.datetime.now())
+        if not vorgang.ID:
+            vorgang.ID = self.makeid()
+        handle = vorgang.ID 
+        vorgang.setVersion(vorgang.getVersion() + 1)
+        if not vorgang.getZeitpunkt():
+            vorgang.setZeitpunkt(datetime.datetime.now())
         zahlung = 'bar'
-        if rechnung.getZahlart() == 'ec':
+        if vorgang.getZahlart() == 'ec':
             zahlung = 'ec'
-        elif rechnung.getBanktransfer():
+        elif vorgang.getBanktransfer():
             zahlung = 'ueberweisung'
-        rechnungsnummer = None
-        rechnungsdatum = None
-        if rechnung.isRechnung():
-            (rechnungsdatum,rechnungsnummer) = rechnung.rechnungsDaten
         kontrollstelle = None
         lieferant = None
-        bio = rechnung.getBio()
+        lieferschein = None
+        bio = vorgang.getBio()
         if type(bio) != bool:
             kontrollstelle = str(bio)
-            lieferant = rechnung.getBioLieferant()
+            lieferant = vorgang.getBioLieferant()
+            lieferschein = vorgang.getBioLieferschein()
         kunde = None
-        if rechnung.kunde and rechnung.kunde.ID():
-            kunde = rechnung.kunde.ID()
+        if vorgang.kunde and vorgang.kunde.ID():
+            kunde = vorgang.kunde.ID()
+        originale = None
+        if vorgang.originale:
+            originale = ','.join(vorgang.originale)
             
-        self.db.execute("INSERT INTO beleg (handle,version,currentversion,user,zeitpunkt,kunde,name,adresse,abholung,telefon,paletten,timestamp,zahlung,bezahlt,summe,liter,manuelle_liter,rechnungsnummer,rechnungsdatum,bio,bio_kontrollstelle,bio_lieferant,status) "
-                        "VALUES            (?,     ?,      1,             ?,   ?,        ?,    ?,   ?,      ?,       ?,      ?,       ?,        ?,      ?,      ?,    ?,    ?,             ?,              ?,             ?,  ?,                 ?,            ?)",
-                        (handle, rechnung.getVersion(), username, rechnung.getZeitpunkt(), kunde, rechnung.getKundenname(), rechnung.kunde.getAdresse(), rechnung.getAbholung(),
-                         rechnung.getTelefon(),str(rechnung.getPaletten()), timestamp, zahlung, rechnung.getPayed(), rechnung.getSumme(), 
-                         str(rechnung.getLiterzahl()), rechnung.getManuelleLiterzahl(), rechnungsnummer, rechnungsdatum, rechnung.isBio(), 
-                         kontrollstelle, lieferant, rechnung.getStatus()))
-        beleg_id = self.db.lastrowid
+        self.db.execute("INSERT INTO vorgang (handle,version,currentversion,user,originale,zeitpunkt,kunde,name,adresse,abholung,telefon,paletten,timestamp,zahlung,bezahlt,summe,liter,manuelle_liter,rechnungsnummer,rechnungsdatum,bio,bio_kontrollstelle,bio_lieferant,bio_lieferschein,status) "
+                        "VALUES              (?,     ?,      1,             ?,   ?,        ?,        ?,    ?,   ?,      ?,       ?,      ?,       ?,        ?,      ?,      ?,    ?,    ?,             ?,              ?,             ?,  ?,                 ?,            ?,               ?)",
+                        (handle, vorgang.getVersion(), username, originale, vorgang.getZeitpunkt(), kunde, vorgang.getKundenname(), vorgang.kunde.getAdresse(), vorgang.getAbholung(),
+                         vorgang.getTelefon(),str(vorgang.getPaletten()), timestamp, zahlung, vorgang.getPayed(), vorgang.getSumme(), 
+                         str(vorgang.getLiterzahl()), vorgang.getManuelleLiterzahl(), vorgang.rechnungsDaten['nummer'], vorgang.rechnungsDaten['datum'], vorgang.isBio(), 
+                         kontrollstelle, lieferant, lieferschein, vorgang.getStatus()))
+        vorgang_id = self.db.lastrowid
 
-        self.db.execute("UPDATE beleg SET currentversion=0 WHERE handle=? AND version != ?", [handle, rechnung.getVersion()])
+        self.db.execute("UPDATE vorgang SET currentversion=0 WHERE handle=? AND version != ?", [handle, vorgang.getVersion()])
         
-        for item in rechnung.getEntries():
+        for item in vorgang.getEntries():
             preislisten_id = None
             if item.preislistenID:
                 preislisten_id = item.preislistenID
             datum = item.getDatum()
             if datum:
                 datum = datum.isoformat()
-            self.db.execute("INSERT INTO posten (beleg,preislisten_id,anzahl,beschreibung,einzelpreis,liter_pro_einheit,einheit,steuersatz,datum) "
+            self.db.execute("INSERT INTO posten (vorgang,preislisten_id,anzahl,beschreibung,einzelpreis,liter_pro_einheit,einheit,steuersatz,datum) "
                             "VALUES             (?,    ?,             ?,     ?,           ?,          ?,                ?,      ?,         ?)",
-                            (beleg_id, preislisten_id, item.getStueckzahl(), item.getBeschreibung(), item.getPreis(), item.getLiterProEinheit(),
+                            (vorgang_id, preislisten_id, item.getStueckzahl(), item.getBeschreibung(), item.getPreis(), item.getLiterProEinheit(),
                              item.getEinheit(),item.getSteuersatz(),datum))
 
 
         self.dbconn.commit()
-        rechnung.changed = False
+        vorgang.changed = False
 
 
     def speichereAnruf(self, rechnung, ergebnis, bemerkung):
         handle = rechnung.ID
-        self.db.execute("INSERT INTO anruf (beleg, nummer, ergebnis, bemerkung) VALUES (?,?,?,?)",
+        self.db.execute("INSERT INTO anruf (vorgang, nummer, ergebnis, bemerkung) VALUES (?,?,?,?)",
                                             (handle, rechnung.getTelefon(), ergebnis, bemerkung))
         self.dbconn.commit()
     
     def getAnrufe(self, rechnung):
         handle = rechnung.ID
-        self.db.execute("SELECT timestamp,ergebnis,bemerkung FROM anruf WHERE beleg=?", (handle,))
+        self.db.execute("SELECT timestamp,ergebnis,bemerkung FROM anruf WHERE vorgang=?", (handle,))
         rows = self.db.fetchall()
         return rows
 
-    def loescheBeleg(self, rechnung):
+    def loescheVorgang(self, rechnung):
         if not rechnung.ID:
             return False
         handle = rechnung.ID
         rechnung.setStatus('deleted')
-        self.speichereBeleg(rechnung)
-        self.db.execute("UPDATE beleg SET currentversion=0 WHERE handle=?", (handle,))
+        self.speichereVorgang(rechnung)
+        self.db.execute("UPDATE vorgang SET currentversion=0 WHERE handle=?", (handle,))
 
-    def speichereZahlung(self, beleg, zahlart, betrag, bemerkung = None):
-        handle = beleg.ID
+    def speichereZahlung(self, vorgang, zahlart, betrag, gegeben = None, zurueck = None, bemerkung = None):
+        handle = vorgang.ID
+        if not handle:
+            # Vorgang ist noch gar nicht gespeichert!
+            self.speichereVorgang(vorgang)
+            handle = vorgang.ID
         timestamp = datetime.datetime.now()
-        self.db.execute("INSERT INTO zahlung (beleg, timestamp, zahlart, betrag, bemerkung) VALUES (?, ?, ?, ?, ?)",
-                        (handle, timestamp, zahlart, betrag, bemerkung))
+        self.db.execute("INSERT INTO zahlung (vorgang, timestamp, zahlart, betrag, gegeben, zurueck, tse_trxnum, bemerkung) VALUES (?, ?, ?, ?, ?, ?, NULL, ?)",
+                        (handle, timestamp, zahlart, betrag, gegeben, zurueck, bemerkung))
         self.dbconn.commit()
 
-    def getZahlungen(self, beleg):
-        handle = beleg.ID
-        self.db.execute("SELECT timestamp, beleg, zahlart, betrag, bemerkung FROM zahlung WHERE beleg=?", (handle,))
+    def updateZahlung(self, zahlung, tse_trxnum):
+        self.db.execute("UPDATE zahlung SET tse_trxnum=? WHERE id=? AND tse_trxnum IS NULL", (tse_trxnum, zahlung,))
+
+    def getZahlungen(self, vorgang):
+        handle = vorgang.ID
+        self.db.execute("SELECT id, timestamp, vorgang, zahlart, betrag, gegeben, zurueck, tse_trxnum, bemerkung FROM zahlung WHERE vorgang=?", (handle,))
         result = self.db.fetchall()
         return result
 
+    def loescheZahlung(self, zahlung):
+        self.db.execute("DELETE FROM zahlung WHERE id=?", (zahlung,))
+        self.dbconn.commit()
+
+
     def listAlleZahlungen(self):
-        self.db.execute("SELECT timestamp, beleg, zahlart, betrag, bemerkung FROM zahlung")
+        self.db.execute("SELECT id, timestamp, vorgang, zahlart, betrag, gegeben, zurueck, tse_trxnum, bemerkung FROM zahlung")
         result = self.db.fetchall()
         return result
 
@@ -933,10 +1116,96 @@ class SQLiteSpeicherBackend(object):
             return {}
         if type(datum) != type(' ') or len(datum) != 10:
             raise ValueError('Date format does not match')
-        self.db.execute("SELECT z.timestamp, beleg, zahlart, z.betrag, (SELECT b.name FROM beleg AS b WHERE handle=z.beleg) AS name FROM zahlung AS z WHERE DATE(z.timestamp) == ? ORDER BY z.timestamp;", (datum,))
+        self.db.execute("SELECT z.timestamp, vorgang, zahlart, z.betrag, (SELECT b.name FROM vorgang AS b WHERE handle=z.vorgang) AS name FROM zahlung AS z WHERE DATE(z.timestamp) == ? ORDER BY z.timestamp;", (datum,))
         result = self.db.fetchall()
         return result
 
+    def speichereKassenbeleg(self, k):
+        def convert(obj):
+            if isinstance(obj, datetime.date):
+                return obj.isoformat()
+            elif isinstance(obj, datetime.datetime):
+                return obj.isoformat()
+            else:
+                return str(obj)
+            
+        k['json_kunde'] = json.dumps(k['kunde'], default=convert)
+        k['json_posten'] = json.dumps(k['posten'], default=convert)
+        k['json_summen'] = json.dumps(k['summen'], default=convert)
+        k['json_zahlungen'] = json.dumps(k['zahlungen'], default=convert)
+        
+        if k['id']:
+            self.db.execute("UPDATE kassenbeleg SET vorgang=?, vorgang_version=?, redatum=?, renr=?, type=?, tse_processtype=?, "
+                            "tse_processdata=?, tse_time_start=?, tse_time_end=?, tse_trxnum=?, tse_serial=?, tse_sigcounter=?, "
+                            "tse_signature=?, json_kunde=?, json_posten=?, json_summen=?, json_zahlungen=?, referenz=?, brutto=?, "
+                            "kassenbewegung=?, bemerkung=? WHERE id=?", 
+                            (k['vorgang'], k['vorgang_version'], k['redatum'], k['renr'], k['type'], k['tse_processtype'],
+                             k['tse_processdata'], k['tse_time_start'], k['tse_time_end'], k['tse_trxnum'], k['tse_serial'],
+                             k['tse_sigcounter'], k['tse_signature'], k['json_kunde'], k['json_posten'], k['json_summen'], 
+                             k['json_zahlungen'], k['referenz'], k['brutto'], k['kassenbewegung'], k['bemerkung'], k['id']))
+        else:
+            self.db.execute("INSERT INTO kassenbeleg "
+                            "(vorgang, vorgang_version, redatum, renr, type, tse_processtype, tse_processdata, tse_time_start, "
+                            "tse_time_end, tse_trxnum, tse_serial, tse_sigcounter, tse_signature, json_kunde, json_posten, "
+                            "json_summen, json_zahlungen, referenz, brutto, kassenbewegung, bemerkung) VALUES "
+                            "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                            (k['vorgang'], k['vorgang_version'], k['redatum'], k['renr'], k['type'], k['tse_processtype'],
+                             k['tse_processdata'], k['tse_time_start'], k['tse_time_end'], k['tse_trxnum'], k['tse_serial'],
+                             k['tse_sigcounter'], k['tse_signature'], k['json_kunde'], k['json_posten'], k['json_summen'], 
+                             k['json_zahlungen'], k['referenz'], k['brutto'], k['kassenbewegung'], k['bemerkung']))
+            k['id'] = self.db.lastrowid
+        self.dbconn.commit()
+        return k['id']
+       
+    def getKassenbeleg(self, id=None, renr=None):
+        if id:
+            self.db.execute("SELECT id, timestamp, vorgang, vorgang_version, redatum, renr, type, tse_processtype, tse_processdata, tse_time_start, "
+                            "tse_time_end, tse_trxnum, tse_serial, tse_sigcounter, tse_signature, json_kunde, json_posten, "
+                            "json_summen, json_zahlungen, referenz, brutto, kassenbewegung, bemerkung FROM kassenbeleg WHERE id=?", (id,))
+        else:
+            self.db.execute("SELECT id, timestamp, vorgang, vorgang_version, redatum, renr, type, tse_processtype, tse_processdata, tse_time_start, "
+                            "tse_time_end, tse_trxnum, tse_serial, tse_sigcounter, tse_signature, json_kunde, json_posten, "
+                            "json_summen, json_zahlungen, referenz, brutto, kassenbewegung, bemerkung FROM kassenbeleg WHERE renr=?", (renr,))
+        b = dict(self.db.fetchone())
+        b['summen'] = json.loads(b['json_summen'])
+        b['kunde'] = json.loads(b['json_kunde'])
+        b['posten'] = json.loads(b['json_posten'])
+        b['zahlungen'] = json.loads(b['json_zahlungen'])
+        return b
+    
+    
+    def listKassenbelege(self, erster=None, letzter=None):
+        if not erster and not letzter:
+            # alle!
+            self.db.execute("SELECT id FROM kassenbeleg")
+        if erster and not letzter:
+            self.db.execute("SELECT id FROM kassenbeleg WHERE id >= ?", (erster,))
+        if erster and letzter:
+            self.db.execute("SELECT id FROM kassenbeleg WHERE id >= ? AND id <= ?", (erster, letzter))
+        ret = []
+        for line in self.db.fetchall():
+            ret.append(self.getKassenbeleg(line['id']))
+        return ret
+       
+    def getAbschluss(self, from_date=None, to_date=None):
+        self.db.execute("SELECT id, timestamp, ersterbeleg, letzterbeleg, summe_brutto, summe_netto, summe_mwst, summe_bar, summe_transit, kassenstand, bemerkung "
+                        "FROM abschluss WHERE timestamp > ? AND timestamp < ?", (from_date, to_date))
+        res = self.db.fetchall()
+        return res
+    
+    def getLetzterAbschluss(self):
+        self.db.execute("SELECT id, timestamp, ersterbeleg, letzterbeleg, summe_brutto, summe_netto, summe_mwst, summe_bar, summe_transit, kassenstand, bemerkung "
+                        "FROM abschluss ORDER BY timestamp DESC LIMIT 1")
+        res = self.db.fetchone()
+        return res
+    
+    def speichereAbschluss(self, a):
+        self.db.execute("INSERT INTO abschluss (ersterbeleg, letzterbeleg, summe_brutto, summe_netto, summe_mwst, summe_bar, summe_transit, kassenstand, bemerkung) "
+                        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                        (a['ersterbeleg'], a['letzterbeleg'], a['summe_brutto'], a['summe_netto'], a['summe_mwst'], a['summe_bar'],
+                         a['summe_transit'], a['kassenstand'], a['bemerkung']))
+        self.dbconn.commit()
+    
     def getAlteBioKunden(self):
         liste = []
         try:
@@ -962,6 +1231,16 @@ class SQLiteSpeicherBackend(object):
         altekunden = self.getAlteBioKunden()
         return kunden + altekunden
 
+    def ladeBioLieferschein(self, id):
+        self.db.execute("SELECT id, kunde, adresse, kontrollstelle, menge, obstart, anlieferdatum, produktionsdatum, abholdatum FROM bio_lieferschein WHERE id=?", (id,))
+        ret = dict(self.db.fetchone())
+        obstart = ret['obstart'].split(',')
+        ret['obstart'] = {}
+        for obst in obstart:
+            ret['obstart'][obst] = True
+        return ret
+        
+        
     def speichereBioLieferschein(self, data):
         obstart = []
         for key in data['obstart'].keys():
@@ -969,23 +1248,39 @@ class SQLiteSpeicherBackend(object):
                 obstart.append(key)
         if not 'anlieferdatum' in data.keys():
             data['anlieferdatum'] = datetime.date.today()
-        self.db.execute("INSERT INTO bio_lieferschein (kunde, adresse, kontrollstelle, menge, obstart, anlieferdatum) VALUES (?, ?, ?, ?, ?, ?)",
-                (data['kunde'], data['adresse'], data['kontrollstelle'], data['menge'],','.join(obstart), data['anlieferdatum']))
+        if not 'produktionsdatum' in data.keys():
+            data['produktionsdatum'] = None
+        if not 'abholdatum' in data.keys():
+            data['abholdatum'] = None
+        if 'id' in data:
+            self.db.execute("UPDATE bio_lieferschein SET kunde=?, adresse=?, kontrollstelle=?, menge=?, "
+                            "obstart=?, anlieferdatum=?, produktionsdatum=?, abholdatum=? WHERE id=?",
+                            (data['kunde'], data['adresse'], data['kontrollstelle'], data['menge'],','.join(obstart), 
+                             data['anlieferdatum'], data['produktionsdatum'], data['abholdatum'], data['id']))
+        else:
+            self.db.execute("INSERT INTO bio_lieferschein (kunde, adresse, kontrollstelle, menge, obstart, anlieferdatum) VALUES (?, ?, ?, ?, ?, ?)",
+                    (data['kunde'], data['adresse'], data['kontrollstelle'], data['menge'],','.join(obstart), data['anlieferdatum']))
         self.dbconn.commit()
         
-    def getBioLieferscheine(self):
-        self.db.execute("SELECT id, kunde, adresse, kontrollstelle, menge, obstart, anlieferdatum, produktionsdatum, abholdatum FROM bio_lieferschein")
+    def getBioLieferscheine(self, kunde=None, fertige=False):
+        if kunde:
+            if type(kunde) != int:
+                kunde = kunde.ID()
+            self.db.execute("SELECT id, kunde, adresse, kontrollstelle, menge, obstart, anlieferdatum, produktionsdatum, abholdatum FROM bio_lieferschein WHERE kunde=?", (kunde,))
+        else:
+            self.db.execute("SELECT id, kunde, adresse, kontrollstelle, menge, obstart, anlieferdatum, produktionsdatum, abholdatum FROM bio_lieferschein")
         data = self.db.fetchall()
         ret = []
         for item in data:
             retitem = dict(item)
+            if item['produktionsdatum'] and not fertige:
+                continue
             obstart = item['obstart'].split(',')
             retitem['obstart'] = {}
             for obst in obstart:
                 retitem['obstart'][obst] = True
             ret.append(retitem)
         return ret
-
 
     def speichereKunde(self, kunde):
         if not kunde:

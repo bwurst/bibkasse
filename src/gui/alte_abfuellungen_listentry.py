@@ -16,10 +16,10 @@
 # You should have received a copy of the GNU General Public License
 # along with Bib2011.  If not, see <http://www.gnu.org/licenses/>.
 
-from PyQt5 import QtWidgets, QtGui, uic
+from PyQt5 import QtCore, QtWidgets, QtGui, uic
 import sys
 
-from lib.BelegDummy import BelegDummy
+from lib.VorgangDummy import VorgangDummy
 from lib.Speicher import Speicher
 
 Wochentage = ['Montag', 'Dienstag', 'Mittwoch', 'Donnerstag', 'Freitag', 'Samstag', 'Sonntag']
@@ -87,10 +87,18 @@ sms_question_image = QtGui.QImage()
 sms_question_image.load('ressource/icons/sms_question.png')
 sms_question_pixmap = QtGui.QPixmap.fromImage(sms_question_image)
 
+dotsmenu_image = QtGui.QImage()
+dotsmenu_image.load('ressource/icons/three_dots.png')
+dotsmenu_pixmap = QtGui.QPixmap.fromImage(dotsmenu_image)
+
 
 class AbfuellungWidget(QtWidgets.QFrame):
-    def __init__(self, invoice):
+    anrufenClicked = QtCore.pyqtSignal()
+    menuClicked = QtCore.pyqtSignal()
+    
+    def __init__(self, invoice, extended=False):
         self.invoice = invoice
+        self.extended = extended
         # Konstruktor der Superklasse aufrufen
         QtWidgets.QFrame.__init__(self)
         
@@ -114,10 +122,28 @@ class AbfuellungWidget(QtWidgets.QFrame):
         else:
             self.ui.label_zeitpunkt.setText('unbekannt')
         self.ui.label_liter.setText('%i Liter' % invoice.getLiterzahl())
-        self.ui.label_gesamtpreis.setText(u'%.2f €' % invoice.getSumme())
+        if invoice.getPayed():
+            self.ui.label_gesamtpreis.setText(u'%.2f €' % invoice.getSumme())
+        else:
+            self.ui.label_gesamtpreis.setText(u'%.2f €' % invoice.getZahlbetrag())
 
         self.__invoice = invoice
         self.update()
+        self.ui.label_anruf.clicked = self.anrufen
+        self.ui.label_anruf.installEventFilter(self)
+        if self.extended:
+            self.ui.label_dots.hide()
+        else:
+            self.ui.label_dots.clicked = self.dotsMenu
+            self.ui.label_dots.installEventFilter(self)
+            self.ui.label_dots.setPixmap(dotsmenu_pixmap)
+
+    def dotsMenu(self):
+        self.menuClicked.emit()
+
+    def anrufen(self):
+        if not self.invoice.getPayed() and not self.extended:
+            self.anrufenClicked.emit()
 
     def update(self):
         if self.invoice.getPayed() and self.invoice.getZahlart() == 'ec':
@@ -161,14 +187,23 @@ class AbfuellungWidget(QtWidgets.QFrame):
                             self.ui.label_anruf.setPixmap(sms_error_pixmap)
                 else:
                     # Hintergrundfarbe, wenn kein Anruf hinterlegt ist (Vor-Ort-Kunde)
-                    if not self.invoice.getPayed():
-                        # Bei bezahlten nicht, sonst ist die erweiterte Ansicht gestört
-                        # FIXME: Hier müsste man irgendwie durchreichen, ob die erweiterte Ansicht aktiv ist.
+                    if not self.extended:
                         self.setStyleSheet('background-color: #ffa;')
+        if self.invoice.getPayed():
+            self.ui.label_gesamtpreis.setText(u'%.2f €' % self.invoice.getSumme())
+        else:
+            self.ui.label_gesamtpreis.setText(u'%.2f €' % self.invoice.getZahlbetrag())
+            
 
-
-    def getBeleg(self):
-        if type(self.__invoice) == BelegDummy:
-            self.__invoice = Speicher().ladeBeleg(self.__invoice.ID) 
+    def getVorgang(self):
+        if type(self.__invoice) == VorgangDummy:
+            self.__invoice = Speicher().ladeVorgang(self.__invoice.ID) 
         return self.__invoice
+    
+        
+    def eventFilter(self, qobject, qevent):
+        if qevent.type() == QtCore.QEvent.MouseButtonPress:
+            qobject.clicked()
+        return False
+
     

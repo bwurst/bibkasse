@@ -27,10 +27,10 @@ from gui.kundenauswahl import showKundenAuswahlDialog
 from gui.kundendaten import showKundendatenDialog
 from gui.speicherndialog import SpeichernDialog
 
-from lib.Beleg import Beleg
+from lib.Vorgang import Vorgang
 from lib.Preisliste import Preisliste
 from lib.Speicher import Speicher
-from lib.BelegThermo import BelegThermo, RegalschildThermo
+from lib.BelegThermo import VorgangThermo, RegalschildThermo
 from lib.SMS import send_sms
 
 PRINTER_OPTIONS = {'media': 'A5',
@@ -75,33 +75,33 @@ class WidgetAbfuellung(QtWidgets.QWidget):
         self.ui.stackedWidget.widget(2).setStyleSheet('background-color: #9696ff;')
         self.ui.stackedWidget.widget(3).setStyleSheet('background-color: #ff9696;')
         
-        self.alte_kundenbelege = None
+        self.alte_kundenvorgaenge = None
         self.liter_alte_abfuellungen = 0
         self.rabattstufe_berechnen = True
         self.modus = 'speichern'
-        self.neuerBeleg()
+        self.neuerVorgang()
 
 
     def closeEvent(self, closeEvent):
-        if self.beleg.changed:
+        if self.vorgang.changed:
             if QtWidgets.QMessageBox.No == QtWidgets.QMessageBox.question(self, u'Änderungen verwerfen', u'Die aktuell geöffnete Abfüllung wurde noch nicht gespeichert. Trotzdem beenden?', buttons=QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No, defaultButton=QtWidgets.QMessageBox.No):
                 closeEvent.ignore()
 
     
-    def updateBeleg(self):
-        if self.alte_kundenbelege and self.rabattstufe_berechnen:
-            liter_gesamt = self.liter_alte_abfuellungen + self.beleg.getLiterzahl()
+    def updateVorgang(self):
+        if self.alte_kundenvorgaenge and self.rabattstufe_berechnen:
+            liter_gesamt = self.liter_alte_abfuellungen + self.vorgang.getLiterzahl()
             stufe = 0
             for s in self.rabattStufen:
                 if liter_gesamt+self.pl.TOLERANZ >= s:
                     stufe = s
-            if stufe != self.beleg.getManuelleLiterzahl():
-                self.beleg.setManuelleLiterzahl(stufe)
+            if stufe != self.vorgang.getManuelleLiterzahl():
+                self.vorgang.setManuelleLiterzahl(stufe)
                 self.update()
                 
 
         self.ui.listWidget.clear()
-        for entry in self.beleg.getEntries():
+        for entry in self.vorgang.getEntries():
             entry = ListEntry(self, entry)
             entry.itemChanged.connect(self.itemChanged)
             item = QtWidgets.QListWidgetItem()
@@ -109,43 +109,43 @@ class WidgetAbfuellung(QtWidgets.QWidget):
             self.ui.listWidget.addItem(item)
             self.ui.listWidget.setItemWidget(item, entry)
         self.ui.listWidget.scrollToBottom()
-        self.ui.label_gesamtpreis.setText(u'%.2f €' % self.beleg.getSumme())
-        self.ui.label_literzahl.setText(u'%i Liter' % self.beleg.getLiterzahl())
+        self.ui.label_gesamtpreis.setText(u'%.2f €' % self.vorgang.getSumme())
+        self.ui.label_literzahl.setText(u'%i Liter' % self.vorgang.getLiterzahl())
 
     def isShown(self):
         self.rabattstufe_berechnen = True
-        if not self.beleg.kunde and self.modus == 'speichern':
+        if not self.vorgang.kunde and self.modus == 'speichern':
             self.showKundenAuswahlDialog()
     
     def update(self):
         self.ui.stackedWidget.setCurrentIndex(0)
         self.ui.listWidget_kundenhinweise.clear()
-        if self.beleg.kunde.ID():
-            self.alte_kundenbelege = self.speicher.listBelegeByKunde(self.beleg.kunde.ID())
-            if self.alte_kundenbelege:
+        if self.vorgang.kunde.ID():
+            self.alte_kundenvorgaenge = self.speicher.listVorgaengeByKunde(self.vorgang.kunde.ID())
+            if self.alte_kundenvorgaenge:
                 self.liter_alte_abfuellungen = 0
-                for b in self.alte_kundenbelege:
-                    if b.ID == self.beleg.ID:
+                for b in self.alte_kundenvorgaenge:
+                    if b.ID == self.vorgang.ID:
                         continue
                     self.liter_alte_abfuellungen += b.getLiterzahl()
                     hinweis = u'Abfüllung am %s: %s Liter' % (b.getZeitpunkt(), b.getLiterzahl())
                     self.ui.listWidget_kundenhinweise.addItem(hinweis)
                 self.ui.listWidget_kundenhinweise.addItem(u'Vorherige Abfüllungen dieses Jahr insgesamt: %s Liter' % (self.liter_alte_abfuellungen,))
-        if self.beleg.getKundenname() == '' and self.modus == 'speichern':
+        if self.vorgang.getKundenname() == '' and self.modus == 'speichern':
             self.ui.input_kundenname.setMinimumHeight(200)
             self.ui.input_kundenname.setStyleSheet(self.stylesheetInputHighlighted)
             self.ui.input_kundenname.setText(u'Hier Kunde wählen')
         else:
             self.ui.input_kundenname.setMinimumHeight(0)
             self.ui.input_kundenname.setStyleSheet(self.stylesheetInputRegular)
-            self.ui.input_kundenname.setText(self.beleg.getKundenname().replace('&', '&&'))
-        if self.beleg.getManuelleLiterzahl():
+            self.ui.input_kundenname.setText(self.vorgang.getKundenname().replace('&', '&&'))
+        if self.vorgang.getManuelleLiterzahl():
             state_checkbox = self.ui.checkBox_manuelleLiter.blockSignals(True)
             state_combo = self.ui.combo_manuelleLiter.blockSignals(True)
             self.ui.checkBox_manuelleLiter.setChecked(True)
             self.ui.combo_manuelleLiter.setEnabled(True)
             self.ui.checkBox_manuelleLiter.setStyleSheet('color: #f00;')
-            index = self.ui.combo_manuelleLiter.findText(str(self.beleg.getManuelleLiterzahl()))
+            index = self.ui.combo_manuelleLiter.findText(str(self.vorgang.getManuelleLiterzahl()))
             self.ui.combo_manuelleLiter.setCurrentIndex(index)
             self.ui.checkBox_manuelleLiter.blockSignals(state_checkbox)
             self.ui.combo_manuelleLiter.blockSignals(state_combo)
@@ -154,11 +154,11 @@ class WidgetAbfuellung(QtWidgets.QWidget):
             self.ui.checkBox_manuelleLiter.setStyleSheet('color: #000;')
             self.ui.combo_manuelleLiter.setEnabled(False)
             self.ui.combo_manuelleLiter.setCurrentIndex(self.ui.combo_manuelleLiter.count()-1)
-        self.updateBeleg()
+        self.updateVorgang()
     
     
     def itemChanged(self):
-        self.updateBeleg()
+        self.updateVorgang()
     
     
     def removeListEntryCallback(self):
@@ -167,8 +167,8 @@ class WidgetAbfuellung(QtWidgets.QWidget):
 
     def newDoubleEntry(self, id1, id2, default2 = None):
         def function():
-            handle = self.beleg.newItem(0, id1)
-            entry = self.beleg.getEntry(handle)
+            handle = self.vorgang.newItem(0, id1)
+            entry = self.vorgang.getEntry(handle)
             icon = None
             text = None
             try:
@@ -179,24 +179,24 @@ class WidgetAbfuellung(QtWidgets.QWidget):
                 print ('Keinen button gefunden für %s' % id1)
                 pass
             if not showNumberInputDialog(entry, icon=icon, text=text) or entry['anzahl'] == 0:
-                self.beleg.deleteItem(handle)
+                self.vorgang.deleteItem(handle)
             else:
-                self.updateBeleg()
+                self.updateVorgang()
                 anz = entry['anzahl']
                 if default2 != None:
                     anz = default2
-                handle = self.beleg.newItem(anz, id2)
-                entry = self.beleg.getEntry(handle)
+                handle = self.vorgang.newItem(anz, id2)
+                entry = self.vorgang.getEntry(handle)
                 if not showNumberInputDialog(entry, gebrauchte = True, icon=icon, text=text) or entry['anzahl'] == 0:
-                    self.beleg.deleteItem(handle)
-            self.updateBeleg()
+                    self.vorgang.deleteItem(handle)
+            self.updateVorgang()
         return function
     
     
     def newEntryCallback(self, preislistenID):
         def showDialog():
-            handle = self.beleg.newItem(0, preislistenID)
-            entry = self.beleg.getEntry(handle)
+            handle = self.vorgang.newItem(0, preislistenID)
+            entry = self.vorgang.getEntry(handle)
             icon = None
             text = None
             try:
@@ -207,19 +207,19 @@ class WidgetAbfuellung(QtWidgets.QWidget):
                 print ('Keinen button gefunden für %s' % preislistenID)
                 pass
             if not showNumberInputDialog(entry, gebrauchte = False, icon=icon, text=text) or entry['anzahl'] == 0:
-                self.beleg.deleteItem(handle)
-            self.updateBeleg()
+                self.vorgang.deleteItem(handle)
+            self.updateVorgang()
     
         def insertSingleItem():
             found = False
-            for entry in self.beleg.getEntries():
+            for entry in self.vorgang.getEntries():
                 if entry.preislistenID == preislistenID:
                     entry.setStueckzahl(entry.getStueckzahl() + 1)
                     found = True
                     break 
             if not found: 
-                self.beleg.newItem(1, preislistenID)
-            self.updateBeleg()
+                self.vorgang.newItem(1, preislistenID)
+            self.updateVorgang()
     
         if preislistenID in ['frischsaft', 'frischsaft_q', 'saft_offen', '3er', '3er_q', 'ohnepressen']:
             return showDialog
@@ -228,20 +228,20 @@ class WidgetAbfuellung(QtWidgets.QWidget):
     
 
     def newFreeEntry(self, initvalue = 0.0):
-        handle = self.beleg.newItem(1)
-        entry = self.beleg.getEntry(handle)
+        handle = self.vorgang.newItem(1)
+        entry = self.vorgang.getEntry(handle)
         entry.setEinheit('')
         entry.setSteuersatz(19.0)
         entry.setBeschreibung(showTextInputDialog('Beschreibung', ['Gutschein', 'Mosten', 'Kleinteile', 'Obstankauf', 'Sonstiges', 'Zeitschriften', 'Mindermengenzuschlag', 'Anzahlung'], ''))
         if entry.getBeschreibung() == '':
             del entry
-            self.beleg.deleteItem(handle)
+            self.vorgang.deleteItem(handle)
             return
         entry.setPreis(initvalue)
         showValueInputDialog(entry)
         if entry.getSumme() == 0:
             del entry
-            self.beleg.deleteItem(handle)
+            self.vorgang.deleteItem(handle)
         self.update()
     
     def newBetragEntry(self):
@@ -254,12 +254,12 @@ class WidgetAbfuellung(QtWidgets.QWidget):
     
     
     def showKundenAuswahlDialog(self):
-        self.beleg.setKunde(showKundenAuswahlDialog(self.beleg.getKunde()))
+        self.vorgang.setKunde(showKundenAuswahlDialog(self.vorgang.getKunde()))
         self.update()
     
     def editKundendaten(self):
-        self.beleg.kunde = showKundendatenDialog(self.beleg.kunde)
-        self.speicher.speichereKunde(self.beleg.kunde)
+        self.vorgang.kunde = showKundendatenDialog(self.vorgang.kunde)
+        self.speicher.speichereKunde(self.vorgang.kunde)
         self.update()
     
     def setzeManuellePreiskategorie(self, nonsense=None):
@@ -272,8 +272,7 @@ class WidgetAbfuellung(QtWidgets.QWidget):
                 liter = None
         else:
             self.rabattstufe_berechnen = False
-        print ('setze %s' % liter)
-        self.beleg.setManuelleLiterzahl(liter)
+        self.vorgang.setManuelleLiterzahl(liter)
         self.update()
     
     
@@ -287,7 +286,7 @@ class WidgetAbfuellung(QtWidgets.QWidget):
         _3er_gebraucht = 0
         _5er_gebraucht = 0
         _10er_gebraucht = 0
-        for item in self.beleg.getEntries():
+        for item in self.vorgang.getEntries():
             if item.preislistenID == '3er_gebraucht':
                 _3er_gebraucht += item['anzahl']
             elif item.preislistenID == '5er_gebraucht':
@@ -307,95 +306,100 @@ class WidgetAbfuellung(QtWidgets.QWidget):
         if _10er_gebraucht > _10er:
             errors.append(u'Mehr gebrauchte 10er-Kartons als insgesamt abgefüllt wurden!')
     
-        if self.beleg.getSumme() < 0.0:
+        if self.vorgang.getSumme() < 0.0:
             errors.append(u'Betrag ist Negativ, es wird eine Gutschrift erstellt!')
-        if self.beleg.getSumme() == 0.0:
+        if self.vorgang.getSumme() == 0.0:
             errors.append(u'Betrag ist 0!')
         return errors
     
     def speichern(self):
-        self.speicher.speichereBeleg(self.beleg)
+        self.speicher.speichereVorgang(self.vorgang)
     
     def regalschilder_drucken(self):
-        for i in range(self.beleg.getPaletten()):
-            if not RegalschildThermo(self.beleg, self.mainwindow.printer):
+        for i in range(self.vorgang.getPaletten()):
+            if not RegalschildThermo(self.vorgang, self.mainwindow.printer):
                 QtWidgets.QMessageBox.warning(self, u'Fehler beim Drucken', 'Drucker nicht angeschlossen, nicht eingeschaltet oder Rechte falsch?', buttons=QtWidgets.QMessageBox.Ok, defaultButton=QtWidgets.QMessageBox.Ok)
                 break
     
     def beleg_drucken(self):
-        if not BelegThermo(self.beleg, self.mainwindow.printer):
+        if not VorgangThermo(self.vorgang, self.mainwindow.printer):
             QtWidgets.QMessageBox.warning(self, u'Fehler beim Drucken', 'Drucker nicht angeschlossen, nicht eingeschaltet oder Rechte falsch?', buttons=QtWidgets.QMessageBox.Ok, defaultButton=QtWidgets.QMessageBox.Ok)
-        #pdfdata = BelegA5(self.beleg)
+        #pdfdata = BelegA5(self.vorgang)
         #t = tempfile.NamedTemporaryFile(delete=False)
         #t.write(pdfdata)
         #t.close()
         #c = cups.Connection()
-        #c.printFile(c.getDefault(), t.name, 'Beleg %s' % self.beleg.getKundenname(), PRINTER_OPTIONS)
+        #c.printFile(c.getDefault(), t.name, 'Vorgang %s' % self.vorgang.getKundenname(), PRINTER_OPTIONS)
         #subprocess.call(['/usr/bin/xdg-open', t.name], shell=False)
         # xdg-open beendet sich sofort!
         #os.unlink(t.name)
     
-    def speichereBeleg(self):
+    def speichereVorgang(self):
         fehler = self.plausibilitaetsCheck()
         for f in fehler:
             if (QtWidgets.QMessageBox.No ==
                 QtWidgets.QMessageBox.warning(self, u'Möglicher Fehler', f + '\nIst das korrekt?', buttons=QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No, defaultButton=QtWidgets.QMessageBox.No)):
                 return False
-        dialog = SpeichernDialog(self.beleg)
+        dialog = SpeichernDialog(self.vorgang)
         dialog.show()
         dialog.exec_()
         if dialog.result() == 1:
             # OK gedrückt!
             if not dialog.speicherungErsetzen():
-                self.beleg.setID(None)
-                self.beleg.setZeitpunkt(datetime.datetime.now())
+                self.vorgang.setID(None)
+                self.vorgang.setZeitpunkt(datetime.datetime.now())
             self.speichern()
+            if dialog.isBio:
+                l = dialog.gewaehlterBioLieferschein()
+                if l and not l['produktionsdatum']:
+                    l['produktionsdatum'] = datetime.date.today()
+                    self.speicher.speichereBioLieferschein(l)
             drucken = dialog.belegDrucken()
             if drucken:
                 self.regalschilder_drucken()
-            anrufe = self.speicher.getAnrufe(self.beleg)
+            anrufe = self.speicher.getAnrufe(self.vorgang)
             if not anrufe and not dialog.kunde_nimmt_mit:
-                telefon = self.beleg.getTelefon()
+                telefon = self.vorgang.getTelefon()
                 if telefon:
                     for num in telefon.split(' / '):
                         if num.startswith('+491') or num.startswith('01'):
                             if (QtWidgets.QMessageBox.Yes == 
                                 QtWidgets.QMessageBox.question(self, u'SMS senden?', u'Soll eine SMS an die Handynummer\n%s\ngesendet werden?' % num, buttons = QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No)):
                                 try:
-                                    send_sms(self.beleg)
+                                    send_sms(self.vorgang)
                                 except RuntimeError as e:
                                     QtWidgets.QMessageBox.warning(self, u'Fehler', str(e.args))
                                 except ValueError as e:
                                     QtWidgets.QMessageBox.warning(self, u'Fehler', str(e.args))
                                 else:
-                                    self.speicher.speichereAnruf(self.beleg, 'sms', '')
+                                    self.speicher.speichereAnruf(self.vorgang, 'sms', '')
                             break
                     
-            self.neuerBeleg()
+            self.neuerVorgang()
             self.mainwindow.reset()
         self.update()
     
-    def kassiereBeleg(self):
+    def kassieren(self):
         fehler = self.plausibilitaetsCheck()
         for f in fehler:
             if (QtWidgets.QMessageBox.No ==
                 QtWidgets.QMessageBox.warning(self, u'Möglicher Fehler', f + '\nIst das korrekt?', buttons=QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No, defaultButton=QtWidgets.QMessageBox.No)):
                 return False
         self.speichern()
-        self.mainwindow.belegKassieren(self.beleg)
+        self.mainwindow.vorgangKassieren(self.vorgang)
         
     
-    def neuerBeleg(self):
-        self.beleg = Beleg()
-        self.alte_kundenbelege = None
+    def neuerVorgang(self):
+        self.vorgang = Vorgang()
+        self.alte_kundenvorgaenge = None
         self.liter_alte_abfuellungen = 0
         self.rabattstufe_berechnen = True
         self.modusSpeichern()
         self.update()
     
-    def belegOeffnen(self, beleg):
-        self.beleg = self.speicher.getBeleg(beleg.ID)
-        self.modusKassieren()
+    def vorgangOeffnen(self, vorgang, kassiervorgang=False):
+        self.vorgang = self.speicher.getVorgang(vorgang.ID)
+        self.modusKassieren(kassiervorgang=kassiervorgang)
         self.update()
         return True
     
@@ -411,13 +415,16 @@ class WidgetAbfuellung(QtWidgets.QWidget):
         self.ui.button_kassieren.setText(u'Kassieren')
 
     
-    def modusKassieren(self):
+    def modusKassieren(self, kassiervorgang):
         self.modus = 'kassieren'
 
-        self.ui.button_speichern.setVisible(True)
-        self.ui.button_speichern.setText(u'Nur Änderungen\nSpeichern')
-        self.ui.button_speichern.setStyleSheet('border: 1px solid black; background-color: white;')
-        self.ui.button_speichern.setMinimumHeight(100)
+        if kassiervorgang:
+            self.ui.button_speichern.setVisible(False)
+        else:
+            self.ui.button_speichern.setVisible(True)
+            self.ui.button_speichern.setText(u'Nur Änderungen\nSpeichern')
+            self.ui.button_speichern.setStyleSheet('border: 1px solid black; background-color: white;')
+            self.ui.button_speichern.setMinimumHeight(100)
 
         self.ui.button_kassieren.setVisible(True)
         self.ui.button_kassieren.setText(u'Kassieren')
@@ -443,14 +450,14 @@ class WidgetAbfuellung(QtWidgets.QWidget):
     
     
     def abbrechen(self):
-        if self.beleg.changed:
+        if self.vorgang.changed:
             if QtWidgets.QMessageBox.Yes == QtWidgets.QMessageBox.question(self, u'Alles Löschen', u'Wirklich alle Änderungen verwerfen und von vorne anfangen?', buttons=QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No, defaultButton=QtWidgets.QMessageBox.No):
-                if self.beleg.ID:
-                    self.speicher.ladeBeleg(self.beleg.ID)
-                self.neuerBeleg()
+                if self.vorgang.ID:
+                    self.speicher.ladeVorgang(self.vorgang.ID)
+                self.neuerVorgang()
                 return True
         else:
-            self.neuerBeleg()
+            self.neuerVorgang()
             return True
         # Wenn die Frage von oben mit Nein beantwortet wurde
         return False
@@ -511,8 +518,8 @@ class WidgetAbfuellung(QtWidgets.QWidget):
         self.ui.button_betrag.clicked.connect(self.newBetragEntry)
         self.ui.button_abzug.clicked.connect(self.newAbzugEntry)          
         
-        self.ui.button_speichern.clicked.connect(self.speichereBeleg)
-        self.ui.button_kassieren.clicked.connect(self.kassiereBeleg)
+        self.ui.button_speichern.clicked.connect(self.speichereVorgang)
+        self.ui.button_kassieren.clicked.connect(self.kassieren)
         
         self.ui.checkBox_manuelleLiter.toggled.connect(self.setzeManuellePreiskategorie)
         self.ui.checkBox_manuelleLiter.toggled.connect(self.ui.combo_manuelleLiter.setEnabled)

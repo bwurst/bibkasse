@@ -16,17 +16,12 @@
 # You should have received a copy of the GNU General Public License
 # along with Bib2011.  If not, see <http://www.gnu.org/licenses/>.
 
-from PyQt5 import QtCore, QtWidgets, QtGui, uic
+from PyQt5 import QtWidgets, QtGui, uic
 
 import tempfile, os, datetime, math, cups, sys
 
 from lib.DatumEtiketten import DatumEtiketten
-
-
-PRINTER_OPTIONS = {'media': 'A4',
-                   'MediaType': 'Labels',
-                   'sides': 'one-sided',
-                   'InputSlot': 'MF1'}
+from lib.Config import config
 
 
 class WidgetLabels(QtWidgets.QWidget):
@@ -138,15 +133,15 @@ class WidgetLabels(QtWidgets.QWidget):
 
     def drucken(self):
         if self.datum != datetime.date.today():
-          if QtWidgets.QMessageBox.No == QtWidgets.QMessageBox.warning(self, u'Datum ist nicht heute', u'Das gewählte Datum ist nicht das heutige Datum! Trotzdem drucken?', buttons=QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No, defaultButton=QtWidgets.QMessageBox.No):
-            return
+            if QtWidgets.QMessageBox.No == QtWidgets.QMessageBox.warning(self, u'Datum ist nicht heute', u'Das gewählte Datum ist nicht das heutige Datum! Trotzdem drucken?', buttons=QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No, defaultButton=QtWidgets.QMessageBox.No):
+                return
           
         tmp = tempfile.NamedTemporaryFile(mode='wb', delete=False)
         tmp.write(DatumEtiketten(self.anzahl, self.skip, self.datum))
         tmp.close()
         
         c = cups.Connection()
-        c.printFile(c.getDefault(), tmp.name, 'Etiketten %s' % self.datum.isoformat(), PRINTER_OPTIONS)
+        c.printFile(c.getDefault(), tmp.name, 'Etiketten %s' % self.datum.isoformat(), config('printer_labels'))
         #subprocess.call(['/usr/bin/xdg-open', tmp.name], shell=False)
         # xdg-open beendet sich sofort!
         os.unlink(tmp.name)

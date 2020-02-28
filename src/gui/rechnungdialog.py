@@ -43,8 +43,8 @@ PRINTER_OPTIONS = {'media': 'A4',
 
 
 
-def showRechnungDialog(invoice, originale = []):
-    dlg = RechnungDialog(invoice, originale)
+def showRechnungDialog(invoice):
+    dlg = RechnungDialog(invoice)
     dlg.show()
     return dlg.exec_()
     
@@ -52,7 +52,7 @@ def showRechnungDialog(invoice, originale = []):
 
 
 class RechnungDialog(QtWidgets.QDialog):
-    def __init__(self, invoice, originale = []):
+    def __init__(self, invoice):
         # Konstruktor der Superklasse aufrufen
         QtWidgets.QDialog.__init__(self, flags=QtCore.Qt.Window | QtCore.Qt.FramelessWindowHint)
         try:
@@ -63,91 +63,28 @@ class RechnungDialog(QtWidgets.QDialog):
 
         self.showFullScreen()
         
-        self.beleg = invoice
-        if len(originale) < 1:
-            originale = [invoice,]
-        self.originale = originale
+        self.vorgang = invoice
         self.speicher = Speicher()
 
-        self.ui.textEdit_adresse.setText(self.beleg.kunde.getAdresse())
-        
-        bio_lieferscheine = self.speicher.getBioLieferscheine()
-        self.bio_lieferscheine = {}
-        
-        self.ui.combo_bioanlieferung.clear()
-        for l in bio_lieferscheine:
-            self.bio_lieferscheine[str(l['id'])] = l
-            obstart = ','.join([x.capitalize() for x in l['obstart'] if l['obstart'][x]])
-            name = l['adresse'].replace('\n', ',')
-            if l['kunde']:
-                kunde = self.speicher.ladeKunde(l['kunde'])
-                name = kunde.getName()
-            
-            if l['abholdatum'] == None:
-                self.ui.combo_bioanlieferung.addItem("%s: %s, %s %s\n%s - %s" % (l['id'], l['anlieferdatum'], l['menge'], obstart, name, l['kontrollstelle']))
-        
-        self.ui.combo_bioanlieferung.currentIndexChanged[str].connect(self.bioanlieferungChanged)
-        if self.beleg.isBio():
-            self.ui.button_bio.setChecked(True)
-
-
-        
-        text = BelegHTML(self.beleg, public=False)
-        self.ui.textBrowser.setHtml(text)
+        self.ui.textEdit_adresse.setText(self.vorgang.kunde.getAdresse())
         
         self.ui.button_ok.clicked.connect(self.ok)
         self.ui.button_abbrechen.clicked.connect(self.cancel)
-        if len(self.originale) > 1:
-            self.ui.button_kundendaten.setEnabled(False)
-        else:
-            self.ui.button_kundendaten.clicked.connect(self.edit_kundendaten)
+        self.ui.button_kundendaten.clicked.connect(self.edit_kundendaten)
         self.update()
 
-    def bioanlieferungChanged(self):
-        daten = self.ui.combo_bioanlieferung.currentText()
-        id = str(daten).split(':')[0]
-        adresse = self.bio_lieferscheine[id]['adresse']
-        self.ui.textEdit_adresse.setText(adresse)
-
     def edit_kundendaten(self):
-        self.beleg.kunde = showKundendatenDialog(self.beleg.kunde)
-        self.speicher.speichereKunde(self.beleg.kunde)
-        self.ui.textEdit_adresse.setText(self.beleg.kunde.getAdresse())
+        self.vorgang.kunde = showKundendatenDialog(self.vorgang.kunde)
+        self.speicher.speichereKunde(self.vorgang.kunde)
+        self.ui.textEdit_adresse.setText(self.vorgang.kunde.getAdresse())
 
     def cancel(self):
         self.reject()
         
     def ok(self):
-        print ('ok clicked')
-        rechnungsadresse = str(self.ui.textEdit_adresse.toPlainText())
-        if self.ui.button_bio.isChecked():
-            index = self.ui.combo_bioanlieferung.currentText().split(':')[0]
-            l = self.bio_lieferscheine[str(index)]
-            lieferant = l['adresse']
-            kontrollstelle = l['kontrollstelle']
-            if ' ' in kontrollstelle:
-                kontrollstelle = kontrollstelle.split(' ')[0]
-            if not kontrollstelle:
-                QtWidgets.QMessageBox.warning(self, u'Fehler', u'Bio-Kontrollstellen-Code fehlt!', buttons=QtWidgets.QMessageBox.Ok, defaultButton=QtWidgets.QMessageBox.Ok)
-                return None
-            for beleg in self.originale:
-                beleg.setBio(True, kontrollstelle, lieferant)
-            self.beleg.setBio(True, kontrollstelle, lieferant)
-        if self.beleg.isBio() and not self.beleg.kunde.getAdresse():
-            QtWidgets.QMessageBox.warning(self, u'Fehler', u'Bio-Bescheinigung erfordert eine Adresse!', buttons=QtWidgets.QMessageBox.Ok, defaultButton=QtWidgets.QMessageBox.Ok)
-            return None
-
-        filename = BelegRechnung(self.beleg, cash=self.ui.button_bar.isChecked(), originale = self.originale, rechnungsadresse = rechnungsadresse)
-        c = cups.Connection()
-        c.printFile(c.getDefault(), filename, 'Rechnung %s' % self.beleg.getRechnungsnummer(), PRINTER_OPTIONS)
-        if self.beleg.isBio():
-            # BIO-Beleg
-            for beleg in self.originale:
-                filename = BioBeleg(beleg, filename='BIO_%s_%02i.pdf' % (beleg.getRechnungsnummer(), self.originale.index(beleg)))
-                c = cups.Connection()
-                c.printFile(c.getDefault(), filename, 'Bio-Beleg %s' % beleg.getRechnungsnummer(), PRINTER_OPTIONS)
+        self.vorgang.setRechnungsadresse(str(self.ui.textEdit_adresse.toPlainText()))
         self.accept()
-            
+
     
     def update(self):
         pass

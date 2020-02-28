@@ -33,6 +33,7 @@ class InvoiceTable(object):
         self.entries = []
         self.vat = {}
         self.sum = 0.0
+        self.payments = []
         self.tender = tender
         self.summary = summary
         if vatType not in ['gross', 'net']:
@@ -79,6 +80,9 @@ class InvoiceTable(object):
     def addTitle(self, title):
         self.entries.append({'type': 'title', 'title': title,})
 
+    def addPayment(self, type, amount, date):
+        self.payments.append({"type": type, "amount": amount, "date": date})
+
 
 
 class Invoice(object):
@@ -89,6 +93,9 @@ class Invoice(object):
         self.id = None
         self.cash = True
         self.tender = tender
+        self.title = 'Rechnung'
+        if tender:
+            self.title = 'Angebot'
         self.official = True
         self.parts = []
         self.pagecount = 0

@@ -192,9 +192,9 @@ def PDFBioBeleg(iv, lieferant, kontrollstelle):
 
 
 if __name__ == '__main__':
-    from lib.Beleg import Beleg
+    from lib.Vorgang import Vorgang
     import datetime
-    i = Beleg()
+    i = Vorgang()
     _5er = i.newItem(10, '5er')
     _10er = i.newItem(10, '10er')
     gebraucht_5er = i.newItem(10, 'frischsaft')

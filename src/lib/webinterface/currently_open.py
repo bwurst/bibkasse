@@ -12,7 +12,7 @@ class currently_open:
         check_authenticated()
         s = Speicher(authtoken=get_authtoken())
         try:
-            belege = s.listBelegeUnbezahlt()
+            belege = s.listVorgaengeUnbezahlt()
         except:
             return 'Speicher nicht entsperrt!'
         data = []
@@ -32,11 +32,11 @@ class display_beleg(object):
         check_authenticated()
         self.speicher = Speicher(authtoken=get_authtoken())
         try:
-            beleg = self.speicher.ladeBeleg(handle)
+            vorgang = self.speicher.ladeVorgang(handle)
         except:
             return 'Speicher nicht entsperrt!'
         
-        return html.page(u'Beleg für %s' % beleg.getKundenname(), self.BelegDetails(beleg))
+        return html.page(u'Beleg für %s' % vorgang.getKundenname(), self.BelegDetails(vorgang))
 
 
 
@@ -78,11 +78,11 @@ Wochentage = ['Montag', 'Dienstag', 'Mittwoch', 'Donnerstag', 'Freitag', 'Samsta
 
 
 def BelegSummaryWeb(b):
-    out = u'<a href="open/%s" class="beleg">' % b.ID
+    out = u'<a href="open/%s" class="vorgang">' % b.ID
     kunde = b.getKundenname()
     if not kunde:
         kunde = '<i>Barverkauf</i>'
-    out += u'<div class="beleg"><div class="row"><div class="col col-12"><h4>%s</h4></div></div>' % kunde
+    out += u'<div class="vorgang"><div class="row"><div class="col col-12"><h4>%s</h4></div></div>' % kunde
     zeitpunkt = b.getZeitpunkt()
     out += '<div class="row"><div class="col col-6">'
     out += u'<div class="baseinfo"><p class="liter">%i Liter</p>' % b.getLiterzahl()

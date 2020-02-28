@@ -16,13 +16,17 @@
 # You should have received a copy of the GNU General Public License
 # along with Bib2011.  If not, see <http://www.gnu.org/licenses/>.
 
-from PyQt5 import QtWidgets, QtCore, uic
-import sys, datetime
+from PyQt5 import QtWidgets, uic
+import sys
 
 
 from lib.helpers import getMoneyValue
 from lib.Speicher import Speicher
-from lib.Statistik import tagesstatistik
+from gui.textinput import showTextInputDialog
+from gui.valueinput import showValueInputDialog
+from lib.Vorgang import Vorgang
+from lib.Kassenbeleg import Kassenbeleg
+from lib.TSE import TSE, TSEException
 
 class WidgetZaehlprotokoll(QtWidgets.QWidget):
     def __init__(self, mainwindow):
@@ -36,44 +40,158 @@ class WidgetZaehlprotokoll(QtWidgets.QWidget):
             sys.exit(1)  
         
         self.connectSlots()
-        self.__kassenbestand = 0.0
-        self.__tageseinnahmen = 0.0
+        self.abschluss = {
+            "ersterbeleg": None,
+            "letzterbeleg": None,
+            "summe_brutto": None,
+            "summe_netto": None,
+            "summe_mwst": None,
+            "summe_bar": None,
+            "summe_transit": None,
+            "kassenstand": None,
+            "bemerkung": None
+            }
+        self.kassenbestand = 0.0
+        self.__kassenstand_berechnet = 0.0
 
     def isShown(self):
-        self.get_tageseinnahmen()
+        pass
+    
+    def update(self):
+        self.get_kassenstand()
+        self.ui.count_500.setValue(0)
+        self.ui.count_200.setValue(0)
+        self.ui.count_100.setValue(0)
+        self.ui.count_50.setValue(0)
+        self.ui.count_20.setValue(0)
+        self.ui.count_10.setValue(0)
+        self.ui.count_5.setValue(0)
+        self.ui.count_2.setValue(0)
+        self.ui.count_1.setValue(0)
+        self.ui.count_050.setValue(0)
+        self.ui.count_020.setValue(0)
+        self.ui.count_010.setValue(0)
+        self.ui.count_005.setValue(0)
+        self.ui.count_002.setValue(0)
+        self.ui.count_001.setValue(0)
+        self.calculate()
+
         
-        
-    def get_tageseinnahmen(self):
+    def get_kassenstand(self):
+        self.abschluss['summe_brutto'] = 0.0
+        self.abschluss['summe_netto'] = 0.0
+        self.abschluss['summe_mwst'] = 0.0
+        self.abschluss['summe_bar'] = 0.0
+        self.abschluss['summe_transit'] = 0.0
+        self.abschluss['ersterbeleg'] = None
         s = Speicher()
-        today = datetime.date.today().isoformat()
-        journal = s.listZahlungenTagesjournal(today)
-        self.__tageseinnahmen = 0.0
-        for zahlung in journal:
-            self.__tageseinnahmen += zahlung['betrag']
+        letzter_abschluss = s.getLetzterAbschluss()
+        kassenstand = 0.0
+        infotext = ''
+        if letzter_abschluss:
+            infotext += 'Letzter Abschluss vom %s:\nKassenstand: %s\n\n' % (letzter_abschluss['timestamp'].isoformat(), getMoneyValue(letzter_abschluss['kassenstand']))
+            kassenstand = letzter_abschluss['kassenstand']
+            self.abschluss['ersterbeleg'] = letzter_abschluss['letzterbeleg'] + 1
+        else:
+            infotext += 'Keinen vorherigen Abschluss gefunden!\n\n'
+        belege = s.listKassenbelege(self.abschluss['ersterbeleg'])
+        for b in belege:
+            if not self.abschluss['ersterbeleg']:
+                self.abschluss['ersterbeleg'] = b['id']
+            kassenstand += b['kassenbewegung']
+            if b['type'] == 'transit' and b['summen']['summe']['mwst'] == 0:
+                self.abschluss['summe_transit'] += b['kassenbewegung']
+            else:
+                self.abschluss['summe_brutto'] += b['summen']['summe']['brutto']
+                self.abschluss['summe_netto'] += b['summen']['summe']['netto']
+                self.abschluss['summe_mwst'] += b['summen']['summe']['mwst']
+                self.abschluss['summe_bar'] += b['kassenbewegung']
+            self.abschluss['letzterbeleg'] = b['id']
+        infotext += 'Umsatz brutto: %s\nUmsatz netto: %s\nMwSt: %s\n\nSumme der Barzahlungen: %s\n\nSumme der Transitbuchungen: %s\n' % (
+            getMoneyValue(self.abschluss['summe_brutto']), getMoneyValue(self.abschluss['summe_netto']), 
+            getMoneyValue(self.abschluss['summe_mwst']), getMoneyValue(self.abschluss['summe_bar']),
+            getMoneyValue(self.abschluss['summe_transit']))
+        self.__kassenstand_berechnet = kassenstand
+        self.ui.infotext.setText(infotext)
         
 
     def connectSlots(self):
-        self.ui.count_500.valueChanged.connect(self.update)
-        self.ui.count_200.valueChanged.connect(self.update)
-        self.ui.count_100.valueChanged.connect(self.update)
-        self.ui.count_50.valueChanged.connect(self.update)
-        self.ui.count_20.valueChanged.connect(self.update)
-        self.ui.count_10.valueChanged.connect(self.update)
-        self.ui.count_5.valueChanged.connect(self.update)
-        self.ui.count_2.valueChanged.connect(self.update)
-        self.ui.count_1.valueChanged.connect(self.update)
-        self.ui.count_050.valueChanged.connect(self.update)
-        self.ui.count_020.valueChanged.connect(self.update)
-        self.ui.count_010.valueChanged.connect(self.update)
-        self.ui.count_005.valueChanged.connect(self.update)
-        self.ui.count_002.valueChanged.connect(self.update)
-        self.ui.count_001.valueChanged.connect(self.update)
-        self.ui.button_drucken.clicked.connect(self.drucken)
+        self.ui.count_500.valueChanged.connect(self.calculate)
+        self.ui.count_200.valueChanged.connect(self.calculate)
+        self.ui.count_100.valueChanged.connect(self.calculate)
+        self.ui.count_50.valueChanged.connect(self.calculate)
+        self.ui.count_20.valueChanged.connect(self.calculate)
+        self.ui.count_10.valueChanged.connect(self.calculate)
+        self.ui.count_5.valueChanged.connect(self.calculate)
+        self.ui.count_2.valueChanged.connect(self.calculate)
+        self.ui.count_1.valueChanged.connect(self.calculate)
+        self.ui.count_050.valueChanged.connect(self.calculate)
+        self.ui.count_020.valueChanged.connect(self.calculate)
+        self.ui.count_010.valueChanged.connect(self.calculate)
+        self.ui.count_005.valueChanged.connect(self.calculate)
+        self.ui.count_002.valueChanged.connect(self.calculate)
+        self.ui.count_001.valueChanged.connect(self.calculate)
+        self.ui.button_abschluss.clicked.connect(self.erstelle_abschluss)
+        self.ui.button_entnahme.clicked.connect(self.entnahme)
+        self.ui.button_einlage.clicked.connect(self.einlage)
+
+    def entnahme(self):
+        beschreibung = showTextInputDialog('Grund der Entnahme', ['Bargeldentnahme', 'Zahlung Mitarbeiter', 'Spesen', 'Trinkgeld'], '')
+        if not beschreibung:
+            return
+        betrag = showValueInputDialog(beschreibung='Entnahme-Betrag')
+        if not betrag:
+            return
+        self.transitbuchung(-betrag, beschreibung)
+
+    def einlage(self):
+        beschreibung = showTextInputDialog('Grund der Einlage', ['Bargeldeinlage', 'Privateinlage', 'Trinkgeld'], '')
+        if not beschreibung:
+            return
+        betrag = showValueInputDialog(beschreibung='Einlage-Betrag')
+        if not betrag:
+            return
+        self.transitbuchung(betrag, beschreibung)
         
-    def drucken(self):
-        print ('Ich soll drucken')
         
-    def update(self, foo=None):
+    def transitbuchung(self, betrag, beschreibung):
+        tse_trxnum = None
+        tse_time_start = None
+        try:
+            tse = TSE()
+            response = tse.transaction_start('', '')
+            tse_trxnum = response.transactionNumber
+            tse_time_start = response.logTime
+        except TSEException:
+            pass
+        v = Vorgang()
+        s = Speicher()
+        v.newItem(1, beschreibung=beschreibung, einzelpreis=betrag, steuersatz=0.0)
+        v.setPayed(True)
+        v.setStatus('transit')
+        s.speichereZahlung(v, 'transit', betrag)
+        v = s.ladeVorgang(v.ID)
+        kb = Kassenbeleg(v, 'transit', tse_trxnum=tse_trxnum, tse_time_start=tse_time_start)
+        self.get_kassenstand()
+        self.calculate()
+        
+    
+    def erstelle_abschluss(self):
+        differenz = self.kassenbestand - self.__kassenstand_berechnet
+        self.abschluss['kassenstand'] = self.kassenbestand
+        if differenz:
+            self.abschluss['bemerkung'] = 'Abweichung der Kasse: %s' % getMoneyValue(differenz)
+            if QtWidgets.QMessageBox.No == QtWidgets.QMessageBox.warning(self, 'Abweichung in der Kasse', 'Der Kassenstand entspricht nicht dem errechneten Kassenstand lauf Aufzeichnungen.\nAbweichungsbetrag: %s\nSoll der Abschluss mit Abweichung vorgenommen werden?' % getMoneyValue(differenz), buttons=QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No, defaultButton=QtWidgets.QMessageBox.No):
+                return
+        else:
+            self.abschluss['bemerkung'] = None
+        s = Speicher()
+        s.speichereAbschluss(self.abschluss)
+        # Drucke Zählprotokoll
+        self.mainwindow.reset()
+        
+        
+    def calculate(self, foo=None):
         _summe = 0.0
         _scheine = 0.0
         summe_500 = self.ui.count_500.value() * 500
@@ -141,10 +259,10 @@ class WidgetZaehlprotokoll(QtWidgets.QWidget):
         _summe += summe_001
         _muenzen += summe_001
         
-        self.__kassenbestand = _summe
+        self.kassenbestand = _summe
         
         self.ui.summe_muenzen.setText(getMoneyValue(_muenzen))
-        self.ui.summe_alles.setText(getMoneyValue(self.__kassenbestand))
-        self.ui.einnahmen.setText(getMoneyValue(self.__tageseinnahmen))
-        self.ui.differenz.setText(getMoneyValue(self.__kassenbestand - self.__tageseinnahmen))
+        self.ui.summe_alles.setText(getMoneyValue(self.kassenbestand))
+        self.ui.kassenstand_berechnet.setText(getMoneyValue(self.__kassenstand_berechnet))
+        self.ui.differenz.setText(getMoneyValue(self.kassenbestand - self.__kassenstand_berechnet))
 

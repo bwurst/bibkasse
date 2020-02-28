@@ -26,34 +26,21 @@ import os, sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(sys.argv[0]), 'src'))
 
+import logging
 
-
-
-class errorcatcher_logfile(object):
-	def __init__(self, foo=None, logfile='output.log'):
-	  	self.logfile = logfile
-	  	
-	def write(self, data):
-		if not type(data) == type(u"xxx"):
-			data = str(data).decode('utf-8')
-		if data.strip():
-			fd = open(self.logfile, 'a')
-			fd.write(unicode(data).encode('utf-8') + '\n')
-			fd.close()
-
-
-class errorcatcher_messagebox(object):
-	def __init__(self, parent):
-	  	self.parent = parent
-	  	
-	def write(self, data):
-		if not type(data) == type(u"xxx"):
-			data = str(data).decode('utf-8')
-		if data.strip():
-			QtGui.QMessageBox.warning(self.parent, u'Fehler', unicode(data), buttons=QtGui.QMessageBox.Ok, defaultButton=QtGui.QMessageBox.Ok)
 
 
 if __name__ == "__main__":
+	fh = logging.FileHandler('bib.log')
+	fh.setLevel(logging.DEBUG)
+	ch = logging.StreamHandler()
+	ch.setLevel(logging.DEBUG)
+	formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+	fh.setFormatter(formatter)
+	ch.setFormatter(formatter)
+	#logging.basicConfig(handlers=[ch, fh])
+	logging.basicConfig(filename='bib.log', format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.DEBUG)
+	logging.info('BiB-Kasse gestartet')
 	pid = os.getpid()
 	pidfile = os.path.join(os.path.dirname(__file__), 'bib.pid')
 	with open(pidfile, 'w') as pf:
@@ -109,17 +96,14 @@ if __name__ == "__main__":
 	
 	main = BibMainWindow(app)
 	
-	#sys.stdout = errorcatcher_messagebox(main)
-	#sys.stderr = errorcatcher_messagebox(main)
-	#sys.stdout = errorcatcher_logfile()
-	#sys.stderr = errorcatcher_logfile(logfile='error.log')
-	
 	main.show()
 
 	
 	ret = app.exec_()
+	del(app)
 
 	if os.path.exists(pidfile):
 		os.unlink(pidfile)
 	
+	logging.info('BiB-Kasse beendet')
 	sys.exit(ret)

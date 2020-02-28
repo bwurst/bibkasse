@@ -18,7 +18,7 @@
 
 import datetime, hashlib
 
-class BelegDummy(object):
+class VorgangDummy(object):
     def __init__(self):
         self.ID = None
         self.__manuelleLiterzahl = None

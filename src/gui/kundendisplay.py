@@ -23,11 +23,16 @@ from PIL import ImageQt
 from lib.BelegHTML import BelegHTML
 
 
-import time, sys, os
-from time import sleep
+import sys, os
+from PyQt5.QtCore import QSize
+import json
+import subprocess
+from PyQt5.QtGui import QPixmap, QIcon
 IMAGE_PATH = 'ressource/kundendisplay'
 IMAGE_DELAY = 45
 #IMAGE_DELAY = 15
+
+qrcode_dummy = QtGui.QIcon('ressource/images/qrcode.png')
 
 
 class Animation(QtCore.QObject):
@@ -47,10 +52,10 @@ class Animation(QtCore.QObject):
 
 
 class KundenDisplay(QtWidgets.QWidget):
-    def __init__(self, application, run):
+    def __init__(self, application, run, mainwindow=None):
         self.active = True
         screens = application.screens()
-        if len(screens) < 2:
+        if len(screens) < 2: # or True: # FIXME: zweits Display bleibt auf diesem System aus!
             # Kein zweiter Bildschirm
             print ('Kein zweiter Bildschirm')
             self.active = False
@@ -59,6 +64,8 @@ class KundenDisplay(QtWidgets.QWidget):
             self.active = False
             return
         
+        self.mainwindow = mainwindow
+    
         # Konstruktor der Superklasse aufrufen
         QtWidgets.QWidget.__init__(self, flags=QtCore.Qt.Window | QtCore.Qt.FramelessWindowHint)
         #QtWidgets.QMainWindow.__init__(self, flags=QtCore.Qt.Window)
@@ -85,7 +92,7 @@ class KundenDisplay(QtWidgets.QWidget):
         self.scene = QtWidgets.QGraphicsScene(0, 0, screenres.width(), screenres.height())
         self.ui.graphicsView.setScene(self.scene)
         
-        self.ui.widgets.setCurrentIndex(1)
+        self.ui.widgets.setCurrentIndex(2)
         self.images = []
         self.loadImages()
         if self.active:
@@ -104,6 +111,9 @@ class KundenDisplay(QtWidgets.QWidget):
             self.timer = QtCore.QTimer(self)
             self.timer.start(IMAGE_DELAY * 1000)
             self.timer.timeout.connect(self.nextImage)
+            self.ui.button_qrcode.clicked.connect(self.qrcode)
+            self.ui.button_drucken.clicked.connect(self.drucken)
+            self.ui.button_fertig.clicked.connect(self.fertig)
         
     def nextImage(self):
         self.currentImage += 1
@@ -156,11 +166,91 @@ class KundenDisplay(QtWidgets.QWidget):
         self.currentPageCounter.setPlainText("%i / %i" % (self.currentImage+1, len(self.images)));
         self.scene.update()
 
+    def fertig(self):
+        self.mainwindow.reset()
 
-    def showBeleg(self, beleg):
+    def upload(self, filename):
+        import requests
+        upload = 'https://rechnung.mosterei-wurst.de/upload.php'
+        files = {'pdf': (os.path.basename(filename), open(filename, 'rb'), 'application/pdf')}
+        response = requests.post(upload, files=files)
+        if not response.ok:
+            return None
+        data = json.loads(response.content)
+        return data['url']
+
+
+    def qrcode(self):
+        url = self.upload(self.aktueller_beleg)
+        proc = subprocess.run(['qrencode', '-o', '-', '-s', '12', '-d', '72', '-t', 'PNG', url], stdout=subprocess.PIPE)
+        image = proc.stdout
+        icon = QPixmap(250, 250)
+        icon.loadFromData(image, 'png')
+        self.ui.button_qrcode.setIcon(QIcon(icon))
+        self.ui.button_qrcode.setIconSize(QSize(250,250))
+        self.ui.button_qrcode.setEnabled(False)
+
+    def drucken(self):
+        filename = self.aktueller_beleg
+        if not self.mainwindow.printer:
+            # Kein Bondrucker
+            QtWidgets.QMessageBox.warning(self.mainwindow, 'Kein Bondrucker', 'Der Bondrucker wurde nicht erkannt!', buttons=QtWidgets.QMessageBox.Ok)
+            return
+        if filename.endswith('.pdf'):
+            filename = filename.replace('.pdf', '.esc')
+        try:
+            with open(filename, 'rb') as escfile:
+                self.mainwindow.printer.raw(escfile.read())
+        except FileNotFoundError:
+            QtWidgets.QMessageBox.warning(self.mainwindow, 'Keine Belegdaten', 'Die Belegdaten sind nicht hinterlegt!', buttons=QtWidgets.QMessageBox.Ok)
+            
+        self.mainwindow.reset()
+        
+            
+    def toggle(self, state):
+        if state:
+            if self.modus == 'beleg':
+                self.ui.widgets.setCurrentIndex(1)
+            elif self.modus == 'vorgang':
+                self.ui.widgets.setCurrentIndex(0)
+            else:
+                self.ui.widgets.setCurrentIndex(2)
+        else:
+            self.ui.widgets.setCurrentIndex(2)
+            
+    def showBeleg(self, filename = None):
+        self.modus = 'beleg'
+        self.ui.button_qrcode.setEnabled(True)
+        self.aktueller_vorgang = None
+        if filename:
+            self.aktueller_beleg = filename
         if not self.active:
             return
-        text = BelegHTML(beleg, public=True)
+        self.ui.button_qrcode.setIcon(qrcode_dummy)
+        htmlfile = filename.replace('.pdf', '.html')
+        try:
+            with open(htmlfile, mode='r', encoding='utf-8') as f:
+                text = f.read()
+                self.ui.textBrowser_beleg.setHtml(text)
+        except FileNotFoundError:
+            self.ui.textBrowser_beleg.setHtml('<em>Datei für diesen Beleg nicht gefunden!</em>')
+        self.ui.textBrowser.setStyleSheet('''
+        * {
+          font-size: 12pt;
+        }
+        ''')
+        self.ui.widgets.setCurrentIndex(1)
+            
+        
+
+    def showVorgang(self, vorgang = None):
+        self.modus = 'vorgang'
+        self.aktueller_beleg = None
+        if vorgang: 
+            self.aktueller_vorgang = vorgang
+        if not self.active:
+            return
+        text = BelegHTML(vorgang, public=True)
         self.ui.textBrowser.setHtml(text)
         self.ui.textBrowser.setStyleSheet('''
         * {
@@ -170,9 +260,11 @@ class KundenDisplay(QtWidgets.QWidget):
         self.ui.widgets.setCurrentIndex(0)
 
     def showSlideshow(self):
+        self.modus = 'slideshow'
+        self.aktueller_beleg = None
         if not self.active:
             return
-        self.ui.widgets.setCurrentIndex(1)
+        self.ui.widgets.setCurrentIndex(2)
         
     def terminate(self):
         if self.active:

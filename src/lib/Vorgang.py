@@ -18,11 +18,11 @@
 
 import datetime, hashlib
 
-from lib.BelegEintrag import BelegEintrag
+from lib.VorgangEintrag import VorgangEintrag
 from lib.Preisliste import Preisliste
 from lib.Kunde import Kunde
 
-class Beleg(object):
+class Vorgang(object):
     def __init__(self, kunde=None):
         self.__preisliste = Preisliste()
         self.ID = None
@@ -37,7 +37,7 @@ class Beleg(object):
         self.__zeitpunkt = None
         self.paletten = 1
         self.changed = False
-        self.rechnungsDaten = None
+        self.rechnungsDaten = {'nummer': None, 'datum': None, "adresse": None}
         self.banktransfer = False
         self.payed = False
         self.zahlart = None
@@ -46,8 +46,10 @@ class Beleg(object):
         self.status = None
         self.zahlungen = []
         self.bio = False
+        self.bio_lieferschein = None
         self.bio_kontrollstelle = None
         self.bio_lieferant = None
+        self.originale = []
         self.__minprice_deleted = False
 
     def setXMLString(self, xmlstring):
@@ -80,7 +82,7 @@ class Beleg(object):
     def newItem(self, anzahl, preislistenID = None, beschreibung = None, einzelpreis = None, 
                 liter_pro_einheit = None, einheit = '', preisliste_link = True, 
                 steuersatz = None, datum = None, autoupdate = True):
-        ie = BelegEintrag(self, 
+        ie = VorgangEintrag(self, 
                           anzahl = anzahl,
                           preislistenID = preislistenID, 
                           beschreibung = beschreibung, 
@@ -135,27 +137,33 @@ class Beleg(object):
             self.newItem(1, 'minprice')
 
     def isRechnung(self):
-        return (self.rechnungsDaten != None)
+        return (self.rechnungsDaten['nummer'] != None)
     
     def getRechnungsdatum(self):
         if not self.isRechnung():
             return None
-        return self.rechnungsDaten[0]
+        return self.rechnungsDaten['datum']
     
     def getRechnungsnummer(self):
         if not self.isRechnung():
             return None
-        return self.rechnungsDaten[1]
+        return self.rechnungsDaten['nummer']
     
     def setRechnungsdaten(self, datum, nummer = None):
         if not datum or not nummer or type(datum) != datetime.date:
-            self.rechnungsDaten = None
+            self.rechnungsDaten['nummer'] = None
+            self.rechnungsDaten['datum'] = None
         else:
-            self.rechnungsDaten = (datum, str(nummer))
+            self.rechnungsDaten['datum'] = datum
+            self.rechnungsDaten['nummer'] = str(nummer)
+        self.changed = True
+
+    def setRechnungsadresse(self, adresse):
+        self.rechnungsDaten['adresse'] = adresse
 
     def deleteItem(self, handle):
         if not handle in self.__entries.keys():
-            raise IndexError("This BelegEintrag is not known!")
+            raise IndexError("This VorgangEintrag is not known!")
         if self.__entries[handle].preislistenID == 'minprice':
             self.__minprice_deleted = True
         self.__entries[handle].unregister()
@@ -164,7 +172,7 @@ class Beleg(object):
         
     def reallyDeleteItem(self, handle):
         if not handle in self.__entries.keys():
-            raise IndexError("This BelegEintrag is not known!")
+            raise IndexError("This VorgangEintrag is not known!")
         if self.__entries[handle].preislistenID == 'minprice':
             self.__minprice_deleted = True
         self.__entryOrder.remove(handle)
@@ -247,7 +255,9 @@ class Beleg(object):
         return [self.__entries[handle] for handle in self.__entryOrder]
 
     def setKunde(self, kunde):
-        self.kunde = kunde
+        if kunde != self.kunde:
+            self.kunde = kunde
+            self.changed = True
                 
     def getKunde(self):
         return self.kunde
@@ -264,6 +274,7 @@ class Beleg(object):
             self.zahlart = 'ueberweisung'
         else:
             self.banktransfer = False
+        self.changed = True
     
     def getBanktransfer(self):
         return self.banktransfer
@@ -275,6 +286,7 @@ class Beleg(object):
             self.zahlart = 'bar'
         else:
             self.payed = False
+        self.changed = True
     
     def getPayed(self):
         return self.payed
@@ -286,6 +298,7 @@ class Beleg(object):
             self.zahlart = 'ec'
         else:
             self.payed = False
+        self.changed = True
 
     def getZahlart(self):
         return self.zahlart
@@ -307,13 +320,6 @@ class Beleg(object):
             summe += z['betrag']
         return self.getSumme() - summe
 
-    def addZahlung(self, zeitpunkt, zahlart, betrag, bemerkung = None):
-        zahlung = {'zeitpunkt': zeitpunkt,
-                   'zahlart': zahlart,
-                   'betrag': betrag,
-                   'bemerkung': bemerkung}
-        self.zahlungen.append(zahlung)
-
     def getZahlungen(self):
         return self.zahlungen
 
@@ -327,7 +333,7 @@ class Beleg(object):
         return self.abholung
 
     def setTelefon(self, telefon):
-        print ('FIXME: beleg.setTelefon() wurde aufgerufen!')
+        print ('FIXME: vorgang.setTelefon() wurde aufgerufen!')
         import traceback
         traceback.print_stack()
         pass
@@ -371,14 +377,22 @@ class Beleg(object):
                 return self.bio_kontrollstelle
         return None
     
-    def setBio(self, bio, kontrollstelle = None, lieferant = None):
+    def getBioLieferschein(self):
+        if self.bio and self.bio_lieferschein:
+            return self.bio_lieferschein
+        return None
+    
+    def setBio(self, bio, kontrollstelle = None, lieferant = None, lieferschein = None):
         oldbio = self.bio
         oldkontrollstelle = self.bio_kontrollstelle
         oldlieferant = self.bio_lieferant
+        oldlieferschein = self.bio_lieferschein
         if bio:
             self.bio = True
         else:
             self.bio = False
+        if bio and lieferschein:
+            self.bio_lieferschein = lieferschein
         if bio and kontrollstelle:
             self.bio_kontrollstelle = str(kontrollstelle).strip()
         if bio and lieferant:
@@ -386,7 +400,8 @@ class Beleg(object):
         if bio and not self.bio_kontrollstelle:
             self.bio_kontrollstelle = self.kunde.getOekoKontrollstelle()
             self.bio_lieferant = self.kunde.getAdresse()
-        if oldbio != self.bio or oldkontrollstelle != self.bio_kontrollstelle or oldlieferant != self.bio_lieferant:
+        if oldbio != self.bio or oldkontrollstelle != self.bio_kontrollstelle or \
+                oldlieferant != self.bio_lieferant or oldlieferschein != self.bio_lieferschein:
             self.changed = True
     
     def getStatus(self):
@@ -397,10 +412,13 @@ class Beleg(object):
             self.changed = True
             self.status = status
    
-    def belegHinzufuegen(self, beleg):
+    def vorgangHinzufuegen(self, vorgang):
         if not self.kunde:
-            self.kunde = beleg.getKunde()
-        for neuerEintrag in beleg.getEntries():
+            self.kunde = vorgang.getKunde()
+        if self.kunde.isBio() and vorgang.isBio():
+            if not self.isBio():
+                self.setBio(True, self.kunde.getOekoKontrollstelle())
+        for neuerEintrag in vorgang.getEntries():
             found = False
             for alterEintrag in self.getEntries():
                 if (alterEintrag.preislistenID == neuerEintrag.preislistenID and 
@@ -410,6 +428,7 @@ class Beleg(object):
                     alterEintrag.setStueckzahl(alterEintrag.getStueckzahl() + neuerEintrag.getStueckzahl())
             if not found:
                 self.addItem(neuerEintrag.copy())
+        self.originale.append(vorgang.ID)
 
     
     def __str__(self):
@@ -431,7 +450,7 @@ class Beleg(object):
 
 
 if __name__ == '__main__':
-    i = Beleg()
+    i = Vorgang()
     _5er = i.newItem(10, '5er')
     _10er = i.newItem(20, '10er')
     gebraucht_5er = i.newItem(100, 'frischsaft')
@@ -452,7 +471,7 @@ if __name__ == '__main__':
     i.aendereAnzahl(mosten, 6)
     print (i)
 
-    i = Beleg()
+    i = Vorgang()
     i.newItem(12, 'frischsaft')
     i.newItem(18, '5er')
     print (i)

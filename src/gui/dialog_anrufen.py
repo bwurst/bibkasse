@@ -31,7 +31,7 @@ Wochentage = ['Montag', 'Dienstag', 'Mittwoch', 'Donnerstag', 'Freitag', 'Samsta
 
 
 class DialogAnrufen(QtWidgets.QDialog):
-    def __init__(self, beleg):
+    def __init__(self, vorgang):
         # Konstruktor der Superklasse aufrufen
         QtWidgets.QDialog.__init__(self, flags=QtCore.Qt.Window | QtCore.Qt.FramelessWindowHint)
         try:
@@ -43,7 +43,7 @@ class DialogAnrufen(QtWidgets.QDialog):
         self.showFullScreen()
         
         self.speicher = Speicher()
-        self.beleg = beleg
+        self.vorgang = vorgang
             
         self.ui.button_edit.clicked.connect(self.edit)
         self.ui.button_erreicht.clicked.connect(self.erreicht)
@@ -54,21 +54,21 @@ class DialogAnrufen(QtWidgets.QDialog):
         
     def erreicht(self):
         zeiten = ['Sofort', 'Heute Nachmittag', 'Heute Abend', u'Morgen früh', 'Morgen Nachmittag', 'Morgen Abend', '13:00', '18:00', '20:00', '8:00']
-        self.beleg.setAbholung(showTextInputDialog('Abholung', zeiten, ''))  
-        self.speicher.speichereBeleg(self.beleg)
-        self.speicher.speichereAnruf(self.beleg, 'erreicht', 'Abholung: %s' % self.beleg.getAbholung())
+        self.vorgang.setAbholung(showTextInputDialog('Abholung', zeiten, ''))  
+        self.speicher.speichereVorgang(self.vorgang)
+        self.speicher.speichereAnruf(self.vorgang, 'erreicht', 'Abholung: %s' % self.vorgang.getAbholung())
         self.accept()
 
     def ab(self):
-        self.speicher.speichereAnruf(self.beleg, 'ab', '')
+        self.speicher.speichereAnruf(self.vorgang, 'ab', '')
         self.accept()
     
     def nichterreicht(self):
-        self.speicher.speichereAnruf(self.beleg, 'nichterreicht', '')
+        self.speicher.speichereAnruf(self.vorgang, 'nichterreicht', '')
         self.accept()
     
     def edit(self):
-        invoice = self.beleg
+        invoice = self.vorgang
         kunde = invoice.getKunde()
         showPhoneNumberInputDialog(kunde)
         self.speicher.speichereKunde(kunde)
@@ -76,7 +76,7 @@ class DialogAnrufen(QtWidgets.QDialog):
         self.ui.label_telefon.setText(telefonnummern)
         
     def update(self):
-        invoice = self.beleg
+        invoice = self.vorgang
         kunde = invoice.getKunde()
         if kunde.getName():
             self.ui.label_kundenname.setText(kunde.getName())
@@ -95,7 +95,7 @@ class DialogAnrufen(QtWidgets.QDialog):
                 self.speicher.speichereKunde(kunde)
         telefonnummern = ' / '.join([formatPhoneNumber(e['wert']) for e in kunde.listKontakteTelefon()])
         self.ui.label_telefon.setText(telefonnummern)
-        anrufe = self.speicher.getAnrufe(self.beleg)
+        anrufe = self.speicher.getAnrufe(self.vorgang)
         text = u''
         for anruf in anrufe:
             if anruf['ergebnis'] == 'erreicht':
@@ -109,7 +109,7 @@ class DialogAnrufen(QtWidgets.QDialog):
             text += '\n'
         self.ui.textBrowser_ergebnisse.setText(text)
         
-        html = BelegHTML(self.beleg)
+        html = BelegHTML(self.vorgang)
         self.ui.textBrowser_beleg.setText(html)
 
     

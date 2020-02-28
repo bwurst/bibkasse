@@ -19,34 +19,32 @@
 
 from lib.helpers import getMoneyValue
 from lib.Speicher import Speicher
+from lib.Config import config
 
 import datetime, getpass
 
-def send_sms(beleg):
-    import socket, os
-    
-    HOST = 'xml3.aspsms.com' 
-    PORT = 5061 
-    
-    SENT='daten/sms/sent'
+MINUTES = 5 # Maximal in dieser Häufigkeit wird nach dem SMS status geschaut
+last_update = None
 
-    CONFIG = 'daten/sms_credentials.json'
-    if not os.path.exists(CONFIG):
-        raise RuntimeError('Die Config-Datei existiert nicht!')
+def send_sms(vorgang):
+    import socket, os
+
+    conf = config('sms')
     
-    import json
-    configfile = open(CONFIG, 'r')
-    conf = json.load(configfile)
+    HOST = conf['host'] 
+    PORT = conf['port']
     
+    SENT=conf['sentfolder']
+
     if not os.path.exists(SENT):
         os.makedirs(SENT)
     sent = open(os.path.join(SENT, datetime.datetime.now().isoformat().replace(':', '-')), 'wb')
      
     userkey = conf['userkey']
     password = conf['password']
-    originator = '+497192936434' # diese Nummer ist bei aspsms.com für uns freigeschaltet
+    originator = conf['number'] # diese Nummer ist bei aspsms.com für uns freigeschaltet
     
-    recipients = beleg.getTelefon().split(' / ')
+    recipients = vorgang.getTelefon().split(' / ')
     recipient = None
     for r in recipients:
         if r.startswith('01'):
@@ -58,12 +56,12 @@ def send_sms(beleg):
     
     recipient = recipient.replace('-', '').replace('.', '')
 
-    text = u"Ihr Saft ist fertig. Möglichst zeitnahe Abholung bitte telefonisch absprechen. Gesamtbetrag: %s (%i Liter). Mosterei Wurst" % (getMoneyValue(beleg.getSumme()), beleg.getLiterzahl())
+    text = u"Ihr Saft ist fertig. Möglichst zeitnahe Abholung bitte telefonisch absprechen. Gesamtbetrag: %s (%i Liter). Mosterei Wurst" % (getMoneyValue(vorgang.getSumme()), vorgang.getLiterzahl())
     
     text = text.replace(u'€', 'EUR')
     text = text.replace('<', '&lt;').replace('>', '&gt;')
     
-    msgid = beleg.ID
+    msgid = vorgang.ID
     if not msgid:
         msgid = '0000'
 
@@ -78,9 +76,9 @@ def send_sms(beleg):
       </Recipient>
       <MessageData>""" + str(text) + u"""</MessageData>
       <Action>SendTextSMS</Action>
-      <URLBufferedMessageNotification>http://sms.mosterei-wurst.de/feedback.py?status=buffered&amp;beleg=</URLBufferedMessageNotification> 
-      <URLDeliveryNotification>http://sms.mosterei-wurst.de/feedback.py?status=delivered&amp;beleg=</URLDeliveryNotification>
-      <URLNonDeliveryNotification>http://sms.mosterei-wurst.de/feedback.py?status=error&amp;beleg=</URLNonDeliveryNotification>
+      <URLBufferedMessageNotification>http://sms.mosterei-wurst.de/feedback.py?status=buffered&amp;vorgang=</URLBufferedMessageNotification> 
+      <URLDeliveryNotification>http://sms.mosterei-wurst.de/feedback.py?status=delivered&amp;vorgang=</URLDeliveryNotification>
+      <URLNonDeliveryNotification>http://sms.mosterei-wurst.de/feedback.py?status=error&amp;vorgang=</URLNonDeliveryNotification>
     </aspsms>
     """
     
@@ -107,32 +105,38 @@ def receive_status_backend(belegliste):
         belegliste = [belegliste, ]
     import requests
     try:
-        rq = requests.get('http://sms.mosterei-wurst.de/read.py', params={'beleg': [beleg.ID for beleg in belegliste]}, timeout=1)
+        rq = requests.get('http://sms.mosterei-wurst.de/read.py', params={'vorgang': [vorgang.ID for vorgang in belegliste]}, timeout=1)
         data = rq.json()
         s = Speicher()
-        for beleg in belegliste:
-            if beleg.ID in data.keys():
-                anrufe = s.getAnrufe(beleg)
-                for ts, status in data[beleg.ID]:
+        for vorgang in belegliste:
+            if vorgang.ID in data.keys():
+                anrufe = s.getAnrufe(vorgang)
+                for ts, status in data[vorgang.ID]:
                     found = False
                     for a in anrufe:
                         if a['ergebnis'] == 'sms-' + status:
                             found = True
                     if not found:
-                        s.speichereAnruf(beleg, 'sms-' + status, 'SMS-Status von ' + datetime.datetime.fromtimestamp(ts).isoformat())
+                        s.speichereAnruf(vorgang, 'sms-' + status, 'SMS-Status von ' + datetime.datetime.fromtimestamp(ts).isoformat())
     except:
         pass
 
 
 def receive_status(belegliste):
-    receive_status_backend(belegliste)
+    global last_update
+    if not last_update or last_update < datetime.datetime.now() - datetime.timedelta(minutes = MINUTES):
+        receive_status_backend(belegliste)
+        last_update = datetime.datetime.now()
+    else:
+        print('no SMS status update needed')
     # Datenbank-Verbindung geht nicht über mehrere Threads
     #thread.start_new_thread(receive_status_backend, (belegliste,))
     
 
     
 if __name__ == '__main__':
-    from lib.Beleg import Beleg
+    from lib.Vorgang import Vorgang
+    from lib.Kunde import Kunde
     import sys
     s = Speicher()
     password = getpass.getpass('Code: ')
@@ -140,13 +144,12 @@ if __name__ == '__main__':
         print ('Falscher Code!')
         sys.exit(1)
 
-
-    b = Beleg()
+    b = Vorgang()
     b.newItem(10, '5er')
     b.newItem(10, '10er')
     b.newItem(10, 'frischsaft')
     
-    b.setTelefon('07192936434 / 01719354145 / 07192936436')
+    b.setKunde(s.sucheKundeTelefon('7192936436')[0])
     send_sms(b)
     b.setID('0000')
 

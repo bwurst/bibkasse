@@ -6,8 +6,8 @@
    <rect>
     <x>0</x>
     <y>0</y>
-    <width>722</width>
-    <height>617</height>
+    <width>1121</width>
+    <height>776</height>
    </rect>
   </property>
   <property name="windowTitle">
@@ -15,7 +15,16 @@
   </property>
   <widget class="QWidget" name="centralwidget">
    <layout class="QGridLayout" name="gridLayout">
-    <property name="margin">
+    <property name="leftMargin">
+     <number>0</number>
+    </property>
+    <property name="topMargin">
+     <number>0</number>
+    </property>
+    <property name="rightMargin">
+     <number>0</number>
+    </property>
+    <property name="bottomMargin">
      <number>0</number>
     </property>
     <item row="0" column="0">
@@ -288,9 +297,153 @@
         </item>
        </layout>
       </widget>
+      <widget class="QWidget" name="page_3"/>
       <widget class="QWidget" name="left_panel_locked">
-       <layout class="QVBoxLayout" name="verticalLayout_2">
-        <item>
+       <layout class="QGridLayout" name="gridLayout_3">
+        <item row="0" column="0">
+         <widget class="QPushButton" name="button_kundendisplay">
+          <property name="sizePolicy">
+           <sizepolicy hsizetype="Minimum" vsizetype="Fixed">
+            <horstretch>0</horstretch>
+            <verstretch>0</verstretch>
+           </sizepolicy>
+          </property>
+          <property name="minimumSize">
+           <size>
+            <width>100</width>
+            <height>100</height>
+           </size>
+          </property>
+          <property name="baseSize">
+           <size>
+            <width>0</width>
+            <height>100</height>
+           </size>
+          </property>
+          <property name="palette">
+           <palette>
+            <active>
+             <colorrole role="Button">
+              <brush brushstyle="SolidPattern">
+               <color alpha="255">
+                <red>255</red>
+                <green>255</green>
+                <blue>255</blue>
+               </color>
+              </brush>
+             </colorrole>
+             <colorrole role="Base">
+              <brush brushstyle="SolidPattern">
+               <color alpha="255">
+                <red>255</red>
+                <green>255</green>
+                <blue>255</blue>
+               </color>
+              </brush>
+             </colorrole>
+             <colorrole role="Window">
+              <brush brushstyle="SolidPattern">
+               <color alpha="255">
+                <red>255</red>
+                <green>255</green>
+                <blue>255</blue>
+               </color>
+              </brush>
+             </colorrole>
+            </active>
+            <inactive>
+             <colorrole role="Button">
+              <brush brushstyle="SolidPattern">
+               <color alpha="255">
+                <red>255</red>
+                <green>255</green>
+                <blue>255</blue>
+               </color>
+              </brush>
+             </colorrole>
+             <colorrole role="Base">
+              <brush brushstyle="SolidPattern">
+               <color alpha="255">
+                <red>255</red>
+                <green>255</green>
+                <blue>255</blue>
+               </color>
+              </brush>
+             </colorrole>
+             <colorrole role="Window">
+              <brush brushstyle="SolidPattern">
+               <color alpha="255">
+                <red>255</red>
+                <green>255</green>
+                <blue>255</blue>
+               </color>
+              </brush>
+             </colorrole>
+            </inactive>
+            <disabled>
+             <colorrole role="Button">
+              <brush brushstyle="SolidPattern">
+               <color alpha="255">
+                <red>255</red>
+                <green>255</green>
+                <blue>255</blue>
+               </color>
+              </brush>
+             </colorrole>
+             <colorrole role="Base">
+              <brush brushstyle="SolidPattern">
+               <color alpha="255">
+                <red>255</red>
+                <green>255</green>
+                <blue>255</blue>
+               </color>
+              </brush>
+             </colorrole>
+             <colorrole role="Window">
+              <brush brushstyle="SolidPattern">
+               <color alpha="255">
+                <red>255</red>
+                <green>255</green>
+                <blue>255</blue>
+               </color>
+              </brush>
+             </colorrole>
+            </disabled>
+           </palette>
+          </property>
+          <property name="font">
+           <font>
+            <pointsize>15</pointsize>
+           </font>
+          </property>
+          <property name="focusPolicy">
+           <enum>Qt::NoFocus</enum>
+          </property>
+          <property name="styleSheet">
+           <string notr="true">background-color: white; border-color: black;</string>
+          </property>
+          <property name="text">
+           <string/>
+          </property>
+          <property name="icon">
+           <iconset>
+            <normaloff>../images/kundendisplay_an.png</normaloff>../images/kundendisplay_an.png</iconset>
+          </property>
+          <property name="iconSize">
+           <size>
+            <width>80</width>
+            <height>80</height>
+           </size>
+          </property>
+          <property name="checkable">
+           <bool>true</bool>
+          </property>
+          <property name="checked">
+           <bool>true</bool>
+          </property>
+         </widget>
+        </item>
+        <item row="1" column="0">
          <spacer name="verticalSpacer">
           <property name="orientation">
            <enum>Qt::Vertical</enum>
@@ -423,8 +576,8 @@
     <rect>
      <x>0</x>
      <y>0</y>
-     <width>722</width>
-     <height>25</height>
+     <width>1121</width>
+     <height>22</height>
     </rect>
    </property>
    <widget class="QMenu" name="menuProgramm">
@@ -437,7 +590,7 @@
    </widget>
    <widget class="QMenu" name="menuSonderfunktionen">
     <property name="title">
-     <string>Sonderfunktionen</string>
+     <string>So&amp;nderfunktionen</string>
     </property>
     <addaction name="actionStatistik_2"/>
     <addaction name="actionZaehlprotokoll"/>
@@ -446,7 +599,7 @@
    </widget>
    <widget class="QMenu" name="menuSystem">
     <property name="title">
-     <string>System</string>
+     <string>S&amp;ystem</string>
     </property>
     <addaction name="actionSperren"/>
     <addaction name="actionHerunterfahren"/>
@@ -494,37 +647,37 @@
   </action>
   <action name="actionStatistik_2">
    <property name="text">
-    <string>Statistik</string>
+    <string>&amp;Statistik</string>
    </property>
   </action>
   <action name="action_update">
    <property name="text">
-    <string>Programm-Update</string>
+    <string>&amp;Programm-Update</string>
    </property>
   </action>
   <action name="actionSperren">
    <property name="text">
-    <string>Sperren</string>
+    <string>&amp;Sperren</string>
    </property>
   </action>
   <action name="actionHerunterfahren">
    <property name="text">
-    <string>Herunterfahren</string>
+    <string>&amp;Herunterfahren</string>
    </property>
   </action>
   <action name="action_changepin">
    <property name="text">
-    <string>Code ändern</string>
+    <string>&amp;Code ändern</string>
    </property>
   </action>
   <action name="action_restart">
    <property name="text">
-    <string>Programm neustarten</string>
+    <string>&amp;Programm neustarten</string>
    </property>
   </action>
   <action name="actionZaehlprotokoll">
    <property name="text">
-    <string>Zählprotokoll</string>
+    <string>&amp;Zählprotokoll</string>
    </property>
   </action>
  </widget>

@@ -86,36 +86,36 @@ class Speicher(object):
         self.__class__.__backend[self.authtoken]['password'] = None
 
     def kundenname(self, handle):
-        beleg = self.backend.getBeleg(handle)
-        if beleg:
-            return beleg.getKundenname()
+        vorgang = self.backend.getVorgang(handle)
+        if vorgang:
+            return vorgang.getKundenname()
         
-    def listBelege(self):
-        return self.backend.listBelege()
+    def listVorgaenge(self):
+        return self.backend.listVorgaenge()
 
-    def listBelegeUnbezahlt(self):
-        return self.backend.listBelegeUnbezahlt()
+    def listVorgaengeUnbezahlt(self, postponed=False):
+        return self.backend.listVorgaengeUnbezahlt(postponed=postponed)
 
-    def listBelegeLastPayed(self, num=8):
-        return self.backend.listBelegeLastPayed(num)
+    def listVorgaengeLastPayed(self, num=8):
+        return self.backend.listVorgaengeLastPayed(num)
 
-    def listBelegeByDateAsc(self):
-        return self.backend.listBelegeByDateAsc()
+    def listVorgaengeByDateAsc(self):
+        return self.backend.listVorgaengeByDateAsc()
 
-    def listBelegeByDateDesc(self):
-        return self.backend.listBelegeByDateDesc()
+    def listVorgaengeByDateDesc(self):
+        return self.backend.listVorgaengeByDateDesc()
 
-    def listBelegeByName(self):
-        return self.backend.listBelegeByName()
+    def listVorgaengeByName(self):
+        return self.backend.listVorgaengeByName()
 
-    def listBelegeByKunde(self, kunde):
-        return self.backend.listBelegeByKunde(kunde)
+    def listVorgaengeByKunde(self, kunde):
+        return self.backend.listVorgaengeByKunde(kunde)
     
-    def listBelegeByNameFilter(self, searchstring):
-        return self.backend.listBelegeByNameFilter(searchstring)
+    def listVorgaengeByNameFilter(self, searchstring):
+        return self.backend.listVorgaengeByNameFilter(searchstring)
 
-    def listBelegeByAmount(self):
-        return self.backend.listBelegeByAmount()
+    def listVorgaengeByAmount(self):
+        return self.backend.listVorgaengeByAmount()
 
     def getBioKunden(self):
         return self.backend.getBioKunden()
@@ -132,17 +132,17 @@ class Speicher(object):
     def speichereAlteRechnungsadressen(self, liste):
         return self.backend.speichereAlteRechnungsadressen(liste)
     
-    def getBeleg(self, handle):
-        return self.backend.getBeleg(handle)
+    def getVorgang(self, handle):
+        return self.backend.getVorgang(handle)
 
-    def getBelegVersionen(self, handle):
-        return self.backend.getBelegVersionen(handle)
+    def getVorgangVersionen(self, handle):
+        return self.backend.getVorgangVersionen(handle)
 
-    def ladeBeleg(self, handle, version = None):
-        return self.backend.ladeBeleg(handle=handle, version=version)
+    def ladeVorgang(self, handle, version = None):
+        return self.backend.ladeVorgang(handle=handle, version=version)
     
-    def speichereBeleg(self, rechnung):
-        return self.backend.speichereBeleg(rechnung)
+    def speichereVorgang(self, vorgang):
+        return self.backend.speichereVorgang(vorgang)
     
     def speichereAnruf(self, rechnung, ergebnis, bemerkung):
         return self.backend.speichereAnruf(rechnung, ergebnis, bemerkung)
@@ -150,23 +150,50 @@ class Speicher(object):
     def getAnrufe(self, rechnung):
         return self.backend.getAnrufe(rechnung)
     
-    def loescheBeleg(self, rechnung):
-        return self.backend.loescheBeleg(rechnung)
+    def loescheVorgang(self, rechnung):
+        return self.backend.loescheVorgang(rechnung)
     
-    def speichereZahlung(self, beleg, zahlart, betrag, bemerkung = None):
-        return self.backend.speichereZahlung(beleg, zahlart, betrag, bemerkung)
+    def speichereZahlung(self, vorgang, zahlart, betrag, gegeben = None, zurueck = None, bemerkung = None):
+        return self.backend.speichereZahlung(vorgang, zahlart, betrag, gegeben, zurueck, bemerkung)
     
-    def getZahlungen(self, beleg):
-        return self.backend.getZahlungen(beleg)
+    def updateZahlung(self, zahlung, tse_trxnum):
+        return self.backend.updateZahlung(zahlung, tse_trxnum)
+
+    def loescheZahlung(self, zahlung):
+        return self.backend.loescheZahlung(zahlung)
+
+    def getZahlungen(self, vorgang):
+        return self.backend.getZahlungen(vorgang)
 
     def listZahlungenTagesjournal(self, datum = None):
         return self.backend.listZahlungenTagesjournal(datum)
     
+    def speichereKassenbeleg(self, kassenbeleg):
+        return self.backend.speichereKassenbeleg(kassenbeleg)
+    
+    def getKassenbeleg(self, id=None, renr=None):
+        return self.backend.getKassenbeleg(id, renr)
+    
+    def listKassenbelege(self, erster=None, letzter=None):
+        return self.backend.listKassenbelege(erster, letzter)
+    
+    def getAbschluss(self, from_date, to_date):
+        return self.backend.getAbschluss(from_date, to_date)
+    
+    def getLetzterAbschluss(self):
+        return self.backend.getLetzterAbschluss()
+    
+    def speichereAbschluss(self, abschluss):
+        return self.backend.speichereAbschluss(abschluss)
+    
     def speichereBioLieferschein(self, data):
         return self.backend.speichereBioLieferschein(data)
 
-    def getBioLieferscheine(self):
-        return self.backend.getBioLieferscheine()
+    def ladeBioLieferschein(self, id):
+        return self.backend.ladeBioLieferschein(id)
+
+    def getBioLieferscheine(self, kunde=None, fertige=False):
+        return self.backend.getBioLieferscheine(kunde, fertige)
     
     def speichereKunde(self, kunde):
         return self.backend.speichereKunde(kunde)
@@ -221,6 +248,6 @@ if __name__ == '__main__':
 #    print (i) 
 #    
     s = Speicher()
-    i = s.listBelege()[0]
+    i = s.listVorgaenge()[0]
     print (i)
-    #s.speichereBeleg(i)
+    #s.speichereVorgang(i)

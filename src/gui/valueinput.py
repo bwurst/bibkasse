@@ -105,7 +105,10 @@ class ValueInputDialog(QtWidgets.QDialog):
         self.close()
 
     def abbrechen(self):
-        self.updateEinzelpreis(self.start_einzelpreis)
+        if self.invoiceEntry:
+            self.updateEinzelpreis(self.start_einzelpreis)
+        else:
+            self.preis = 0.0
         self.close()
 
     def eventFilter(self, qobject, qevent):

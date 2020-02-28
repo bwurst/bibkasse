@@ -16,10 +16,11 @@
 # You should have received a copy of the GNU General Public License
 # along with Bib2011.  If not, see <http://www.gnu.org/licenses/>.
 
-from PyQt5 import QtCore, QtWidgets, uic
+from PyQt5 import QtGui, QtCore, QtWidgets, uic
 
 import time, sys
 import signal
+import logging
 
 from gui.widget_abfuellung import WidgetAbfuellung
 from gui.widget_history import WidgetHistory
@@ -38,8 +39,12 @@ from gui.kundendisplay import KundenDisplay
 from lib.printer.esc import ESCPrinter
 from lib.Shutdown import shutdown, restart
 from lib.Speicher import Speicher
+from gui.widget_beleg import WidgetBeleg
 
 UNLOCK_TIME = 120
+
+icon_kundendisplay_off = QtGui.QIcon("ressource/images/kundendisplay_aus.png")
+icon_kundendisplay_on = QtGui.QIcon("ressource/images/kundendisplay_an.png")
 
 
 class BibMainWindow(QtWidgets.QMainWindow):
@@ -74,7 +79,7 @@ class BibMainWindow(QtWidgets.QMainWindow):
         #    self.showFullScreen()
 
 
-        self.kundendisplay = KundenDisplay(self.application, run=True)
+        self.kundendisplay = KundenDisplay(self.application, run=True, mainwindow=self)
         
         self.__restart_requested = False
         self.reallyLocked = False
@@ -86,7 +91,6 @@ class BibMainWindow(QtWidgets.QMainWindow):
                         'abfuellung': WidgetAbfuellung(self),
                         'history': WidgetHistory(self), 
                         'auftraege': WidgetAuftraege(self), 
-                        'history_complete': WidgetHistory(self, extended=True), 
                         'history_last10': WidgetHistory(self, last10=True), 
                         'labels': WidgetLabels(self),
                         'statistics': WidgetStatistics(self),
@@ -94,6 +98,7 @@ class BibMainWindow(QtWidgets.QMainWindow):
                         'kasse': WidgetKasse(self),
                         'codeentry': WidgetCodeEntry(self),
                         'changepin': WidgetCodeEntry(self, True),
+                        'beleg': WidgetBeleg(self),
                         }
         
         self.LOCK = []
@@ -116,12 +121,31 @@ class BibMainWindow(QtWidgets.QMainWindow):
             print ("Drucker nicht bereit!")
             #QtWidgets.QMessageBox.warning(self.ui, u'Fehler', str("Drucker nicht bereit oder Rechte nicht korrekt!"), buttons=QtWidgets.QMessageBox.Ok, defaultButton=QtWidgets.QMessageBox.Ok)        
 
-    def addRecentInvoice(self, beleg):
+    def closeEvent(self, event):
+        for wid in list(self.WIDGETS.keys()):
+            logging.info('beende Widget %s' % wid)
+            try:
+                self.WIDGETS[wid].shutdown()
+            except:
+                pass
+            finally:
+                del(self.WIDGETS[wid])
+        super().closeEvent(event)
+
+    def toggleKundendisplay(self, foo=None):
+        state = self.ui.button_kundendisplay.isChecked()
+        if state:
+            self.ui.button_kundendisplay.setIcon(icon_kundendisplay_on)
+        else:
+            self.ui.button_kundendisplay.setIcon(icon_kundendisplay_off)
+        self.kundendisplay.toggle(state)
+
+    def addRecentInvoice(self, vorgang):
         for i in range(len(self.letzte_belege)):
-            if self.letzte_belege[i].ID == beleg.ID:
+            if self.letzte_belege[i].ID == vorgang.ID:
                 del self.letzte_belege[i]
                 break
-        self.letzte_belege[:0] = [beleg,]
+        self.letzte_belege[:0] = [vorgang,]
         if len(self.letzte_belege) > 10:
             del self.letzte_belege[10]
         
@@ -150,22 +174,29 @@ class BibMainWindow(QtWidgets.QMainWindow):
             self.unlock_timer.stop()
 
     def reset(self):
-        self.kundendisplay.showSlideshow()
+        #self.kundendisplay.showSlideshow()
         self.ui.leftPanel.setCurrentIndex(0)
-        self.WIDGETS['abfuellung'].neuerBeleg()
+        self.WIDGETS['abfuellung'].neuerVorgang()
         self.showStartpage()
 
-    def belegOeffnen(self, beleg):
-        self.WIDGETS['abfuellung'].belegOeffnen(beleg)
+    def vorgangOeffnen(self, vorgang, kassiervorgang=False):
+        self.WIDGETS['abfuellung'].vorgangOeffnen(vorgang, kassiervorgang=kassiervorgang)
         self.showWidget('abfuellung')
-        self.ui.leftPanel.setCurrentIndex(0)
+        if kassiervorgang:
+            self.ui.leftPanel.setCurrentIndex(2)
+        else:
+            self.ui.leftPanel.setCurrentIndex(0)
         
         
-    def belegKassieren(self, beleg):
-        self.ui.leftPanel.setCurrentIndex(1)
-        self.WIDGETS['kasse'].belegKassieren(beleg)
+    def vorgangKassieren(self, vorgang):
+        self.ui.leftPanel.setCurrentIndex(2)
+        self.WIDGETS['kasse'].vorgangKassieren(vorgang)
         self.showWidget('kasse')
         
+    def belegAnzeigen(self, filename):
+        self.ui.leftPanel.setCurrentIndex(2)
+        self.WIDGETS['beleg'].showBeleg(filename)
+        self.showWidget('beleg')
     
     
     def keepUnlocked(self):
@@ -269,10 +300,15 @@ class BibMainWindow(QtWidgets.QMainWindow):
         self.ui.leftPanel.setCurrentIndex(0)
         self.showWidget('zaehlprotokoll')
 
+    def showBelegWidget(self):
+        self.ui.leftPanel.setCurrentIndex(2)
+        self.showWidget('beleg')
+
     def selfUpdate(self):
         showUpdateDialog()
         
     def reallyLock(self):
+        self.kundendisplay.showSlideshow()
         self.reallyLocked = True
         self.ui.lock_status.setCurrentIndex(0)
         self.unlocked = False
@@ -341,6 +377,8 @@ class BibMainWindow(QtWidgets.QMainWindow):
 
         self.ui.button_zurueck.clicked.connect(self.showStartpage)
         self.ui.button_widget_kasse.clicked.connect(self.oeffneKasse)
+
+        self.ui.button_kundendisplay.toggled.connect(self.toggleKundendisplay)
 
         self.ui.button_lock.clicked.connect(self.reallyLock)
 

@@ -26,11 +26,11 @@ from lib.Preisliste import Preisliste
 def tagesstatistik(year = None):
     ret = {}
     speicher = Speicher(year)
-    speicher.backend.db.execute('SELECT handle, liter, zeitpunkt, summe, preislisten_id, anzahl, einzelpreis, datum FROM posten CROSS JOIN beleg ON (posten.beleg=beleg.id) WHERE beleg.currentversion=1')
+    speicher.backend.db.execute('SELECT handle, liter, zeitpunkt, summe, preislisten_id, anzahl, einzelpreis, datum FROM posten CROSS JOIN vorgang ON (posten.vorgang=vorgang.id) WHERE vorgang.currentversion=1')
     data = speicher.backend.db.fetchall()
     currenthandle = None
     for line in data:
-        datum = datetime.datetime.strptime(line['zeitpunkt'], "%Y-%m-%d %H:%M:%S.%f").date().isoformat()
+        datum = line['zeitpunkt'].date().isoformat()
         if datum not in ret.keys():
             ret[datum] = {'liter': 0,}
         id = line['preislisten_id']
@@ -69,7 +69,7 @@ def ueberschuss_nach_preiskategorien(year = None):
     rabattstufen = p.rabattStufen('5er')
     ret = {}
     speicher = Speicher(year)
-    speicher.backend.db.execute('SELECT liter, manuelle_liter, preislisten_id, anzahl, einzelpreis FROM posten INNER JOIN beleg ON (posten.beleg=beleg.id) WHERE beleg.currentversion=1')
+    speicher.backend.db.execute('SELECT liter, manuelle_liter, preislisten_id, anzahl, einzelpreis FROM posten INNER JOIN vorgang ON (posten.vorgang=vorgang.id) WHERE vorgang.currentversion=1')
     data = speicher.backend.db.fetchall()
     for line in data:
         kategorie = 0
@@ -95,7 +95,7 @@ def umsatzstatistik(year = None):
     speicher = Speicher(year)
     anonym_umsatz = 0.0
     rechnungen_summe = 0.0
-    speicher.backend.db.execute('SELECT summe, rechnungsnummer, name FROM beleg WHERE beleg.currentversion=1')
+    speicher.backend.db.execute('SELECT summe, rechnungsnummer, name FROM vorgang WHERE vorgang.currentversion=1')
     data = speicher.backend.db.fetchall()
     for line in data:
         if line['name']:
@@ -221,11 +221,11 @@ def html_jahresstatistik(year = None):
     html += u'<h4>Überweisungen</h4>\n<table>\n'
     ueberweisungen_summe = 0.0
     speicher = Speicher(year)
-    speicher.backend.db.execute('SELECT zeitpunkt, bezahlt, zahlung, name, summe FROM beleg WHERE currentversion=1')
+    speicher.backend.db.execute('SELECT zeitpunkt, bezahlt, zahlung, name, summe FROM vorgang WHERE currentversion=1')
     data = speicher.backend.db.fetchall()
     for line in data:
         if not line['bezahlt'] and line['zahlung'] == 'ueberweisung':
-            html += u'<tr><td>%s</td><td>%s</td><td>%.2f €</td></tr>\n' % (str(datetime.datetime.strptime(line['zeitpunkt'], "%Y-%m-%d %H:%M:%S.%f").date()), line['name'], line['summe']) 
+            html += u'<tr><td>%s</td><td>%s</td><td>%.2f €</td></tr>\n' % (str(line['zeitpunkt'].date()), line['name'], line['summe']) 
             ueberweisungen_summe += line['summe']
     html += u'</table>'
     html += u'<p>Summe aller Überweisungen: %.2f €' % ueberweisungen_summe
@@ -235,8 +235,8 @@ def html_jahresstatistik(year = None):
     zahlungen = Speicher(year).backend.listAlleZahlungen()
     for z in zahlungen:
         if z['zahlart'] == 'ec':
-            b = Speicher(year).ladeBeleg(z['beleg'])
-            html += u'<tr><td>%s</td><td>%s</td><td>%.2f €</td></tr>\n' % (str(datetime.datetime.strptime(z['timestamp'], "%Y-%m-%d %H:%M:%S.%f").date()), b.getKundenname(), z['betrag']) 
+            b = Speicher(year).ladeVorgang(z['vorgang'])
+            html += u'<tr><td>%s</td><td>%s</td><td>%.2f €</td></tr>\n' % (str(z['timestamp'].date()), b.getKundenname(), z['betrag']) 
             ec_summe += z['betrag']
     html += u'</table>'
     html += u'<p>Summe aller EC-Zahlungen: %.2f €' % ec_summe
